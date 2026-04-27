@@ -1,15 +1,20 @@
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { palette, radii } from '../theme/ui';
+import { radii } from '../theme/ui';
+import { useTema } from '../context/TemaContext';
 
 const ITEMS = [
-  { key: 'Profile', label: 'Perfil' },
-  { key: 'SmashOrPass', label: 'Smash' },
-  { key: 'UploadPhoto', label: 'Subir' },
-  { key: 'Settings', label: 'Ajustes' },
+  { key: 'Home', label: 'Inicio', icon: '🏠' },
+  { key: 'SmashOrPass', label: 'Klic', icon: '🔥' },
+  { key: 'UploadPhoto', label: 'Subir', icon: '📸' },
+  { key: 'Profile', label: 'Perfil', icon: '👤' },
+  { key: 'Settings', label: 'Ajustes', icon: '⚙️' },
 ];
 
 export default function MainMenu({ navigation, active }) {
+  const { palette } = useTema();
+  const styles = makeStyles(palette);
+
   return (
     <View style={styles.wrapper}>
       {ITEMS.map((item) => {
@@ -17,10 +22,16 @@ export default function MainMenu({ navigation, active }) {
         return (
           <TouchableOpacity
             key={item.key}
-            style={[styles.item, selected && styles.itemActive]}
+            style={styles.item}
             onPress={() => navigation.navigate(item.key)}
           >
-            <Text style={[styles.text, selected && styles.textActive]}>{item.label}</Text>
+            <Text style={styles.icon}>{item.icon}</Text>
+            <Text style={[styles.text, selected && { color: palette.primary, fontWeight: '700' }]}>
+              {item.label}
+            </Text>
+            {selected && (
+              <View style={[styles.dot, { backgroundColor: palette.primary }]} />
+            )}
           </TouchableOpacity>
         );
       })}
@@ -28,35 +39,27 @@ export default function MainMenu({ navigation, active }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (palette) => StyleSheet.create({
   wrapper: {
     flexDirection: 'row',
     backgroundColor: palette.panel,
-    borderColor: palette.border,
-    borderWidth: 1,
-    borderRadius: radii.pill,
-    padding: 6,
-    width: '100%',
-    maxWidth: 360,
-    alignSelf: 'center',
-    marginTop: 16,
-    marginBottom: 10,
+    borderTopWidth: 1,
+    borderTopColor: palette.border,
+    paddingBottom: 20,
+    paddingTop: 8,
+    paddingHorizontal: 4,
   },
   item: {
-    flex: 1,
-    alignItems: 'center',
-    borderRadius: radii.pill,
-    paddingVertical: 10,
+    flex: 1, alignItems: 'center',
+    paddingVertical: 4, gap: 2,
   },
-  itemActive: {
-    backgroundColor: palette.primary,
-  },
+  icon: { fontSize: 20 },
   text: {
     color: palette.textMuted,
-    fontWeight: '600',
-    fontSize: 13,
+    fontSize: 10, fontWeight: '600',
   },
-  textActive: {
-    color: palette.text,
+  dot: {
+    width: 4, height: 4,
+    borderRadius: 2, marginTop: 2,
   },
 });

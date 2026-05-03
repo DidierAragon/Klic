@@ -22,6 +22,7 @@ export default function UploadPhotoScreen({ navigation }) {
   const [media, setMedia] = useState(null);
   const [texto, setTexto] = useState('');
   const [descripcion, setDescripcion] = useState('');
+  const [precio, setPrecio] = useState('');
   const [loading, setLoading] = useState(false);
 
   const styles = makeStyles(palette);
@@ -39,15 +40,20 @@ export default function UploadPhotoScreen({ navigation }) {
     };
 
     if (tipo === 'foto') {
-      options.mediaTypes = ImagePicker.MediaType.Images;
+      options.mediaTypes = ['images'];
       options.aspect = [3, 4];
     } else if (tipo === 'video') {
-      options.mediaTypes = ImagePicker.MediaType.Videos;
+      options.mediaTypes = ['videos'];
       options.videoMaxDuration = 60;
     }
 
-    const result = await ImagePicker.launchImageLibraryAsync(options);
-    if (!result.canceled) setMedia(result.assets[0]);
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync(options);
+      if (!result.canceled) setMedia(result.assets[0]);
+    } catch (error) {
+      console.error(error);
+      Alert.alert('Error', 'No se pudo abrir la galería');
+    }
   };
 
   const publicar = async () => {
@@ -60,12 +66,15 @@ export default function UploadPhotoScreen({ navigation }) {
       if (!media) { Alert.alert('Error', `Selecciona un${tipo === 'foto' ? 'a foto' : ' video'} primero`); return; }
     }
 
+    const precioFinal = parseFloat(precio) || 0;
+
     setLoading(true);
     try {
       if (tipo === 'opinion') {
         const { error } = await supabase.from('opiniones').insert({
           user_id: user.id,
           contenido: texto.trim(),
+          precio: precioFinal,
         });
         if (error) throw error;
 
@@ -93,7 +102,9 @@ export default function UploadPhotoScreen({ navigation }) {
 
         if (tipo === 'foto') {
           const { error } = await supabase.from('fotos_perfil').insert({
-            user_id: user.id, url: publicUrl,
+            user_id: user.id, 
+            url: publicUrl,
+            precio: precioFinal,
           });
           if (error) throw error;
         } else {
@@ -101,6 +112,7 @@ export default function UploadPhotoScreen({ navigation }) {
             user_id: user.id,
             url: publicUrl,
             descripcion: descripcion.trim() || null,
+            precio: precioFinal,
           });
           if (error) throw error;
         }
@@ -112,6 +124,7 @@ export default function UploadPhotoScreen({ navigation }) {
       setMedia(null);
       setTexto('');
       setDescripcion('');
+      setPrecio('');
 
     } catch (e) {
       Alert.alert('Error', e.message);
@@ -233,7 +246,37 @@ export default function UploadPhotoScreen({ navigation }) {
                 maxLength={200}
               />
             )}
+
+            {media && (
+              <View style={styles.priceContainer}>
+                <Ionicons name="pricetag-outline" size={20} color={palette.primary} />
+                <TextInput
+                  style={styles.priceInput}
+                  placeholder="Precio (opcional, ej: 4.99)"
+                  placeholderTextColor={palette.textMuted}
+                  value={precio}
+                  onChangeText={setPrecio}
+                  keyboardType="numeric"
+                />
+                <Text style={{ color: palette.textMuted, fontSize: 12 }}>USD</Text>
+              </View>
+            )}
           </>
+        )}
+
+        {tipo === 'opinion' && (
+          <View style={[styles.priceContainer, { marginTop: -10, marginBottom: 20 }]}>
+            <Ionicons name="pricetag-outline" size={20} color={palette.primary} />
+            <TextInput
+              style={styles.priceInput}
+              placeholder="Precio para ver esta opinión (opcional)"
+              placeholderTextColor={palette.textMuted}
+              value={precio}
+              onChangeText={setPrecio}
+              keyboardType="numeric"
+            />
+            <Text style={{ color: palette.textMuted, fontSize: 12 }}>USD</Text>
+          </View>
         )}
 
         {/* Botón publicar */}
@@ -346,6 +389,18 @@ const makeStyles = (palette) => StyleSheet.create({
   },
   publishBtnDisabled: { opacity: 0.45 },
   publishBtnText: { color: '#fff', fontWeight: '800', fontSize: 16 },
+
+  priceContainer: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: palette.panel, borderRadius: radii.md,
+    borderWidth: 1, borderColor: palette.border,
+    paddingHorizontal: 14, paddingVertical: 10,
+    marginBottom: 20,
+  },
+  priceInput: {
+    flex: 1, color: palette.text, fontSize: 15,
+    paddingVertical: 4,
+  },
 
   skipBtn: { alignItems: 'center', paddingVertical: 8 },
   skipText: { fontSize: 14, fontWeight: '600' },

@@ -2,12 +2,13 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, Image, TouchableOpacity,
   ActivityIndicator, RefreshControl, FlatList,
-  Dimensions, Animated, PanResponder, TextInput, Alert, Modal
+  Dimensions, Animated, PanResponder, TextInput, Alert
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../services/supabase';
 import MainMenu from '../../components/MainMenu';
+import LikeButton from '../../components/LikeButton';
 import { radii } from '../../theme/ui';
 import { useTema } from '../../context/TemaContext';
 
@@ -33,14 +34,12 @@ export default function HomeScreen({ navigation }) {
       Animated.spring(translateX, {
         toValue: -idx * SCREEN_WIDTH,
         useNativeDriver: true,
-        tension: 100,
-        friction: 12,
+        tension: 100, friction: 12,
       }),
       Animated.spring(tabIndicatorX, {
         toValue: idx * (SCREEN_WIDTH / TABS.length),
         useNativeDriver: true,
-        tension: 100,
-        friction: 12,
+        tension: 100, friction: 12,
       }),
     ]).start();
     setTabIndex(idx);
@@ -49,7 +48,8 @@ export default function HomeScreen({ navigation }) {
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > Math.abs(g.dy) * 1.5 && Math.abs(g.dx) > 10,
+      onMoveShouldSetPanResponder: (_, g) =>
+        Math.abs(g.dx) > Math.abs(g.dy) * 1.5 && Math.abs(g.dx) > 10,
       onPanResponderMove: (_, g) => {
         translateX.setValue(-tabIndex * SCREEN_WIDTH + g.dx);
       },
@@ -62,8 +62,7 @@ export default function HomeScreen({ navigation }) {
           Animated.spring(translateX, {
             toValue: -tabIndex * SCREEN_WIDTH,
             useNativeDriver: true,
-            tension: 100,
-            friction: 12,
+            tension: 100, friction: 12,
           }).start();
         }
       },
@@ -85,8 +84,11 @@ export default function HomeScreen({ navigation }) {
         supabase.from('videos')
           .select('*, users(nombre, avatar_url)')
           .order('created_at', { ascending: false }).limit(20),
-        user ? supabase.from('compras').select('contenido_id').eq('comprador_id', user.id) : Promise.resolve({ data: [] }),
+        user
+          ? supabase.from('compras').select('contenido_id').eq('comprador_id', user.id)
+          : Promise.resolve({ data: [] }),
       ]);
+
       setFotos(f || []);
       setOpiniones(o || []);
       setVideos(v || []);
@@ -101,29 +103,31 @@ export default function HomeScreen({ navigation }) {
 
   useEffect(() => { cargarTodo(); }, [cargarTodo]);
 
+  const onRefresh = () => { setRefreshing(true); cargarTodo(); };
+
   const comprarContenido = async (item, tabla) => {
     if (!currentUser) return Alert.alert('Error', 'Debes iniciar sesión');
-    
     Alert.alert(
       'Confirmar compra',
       `¿Deseas comprar este contenido por $${item.precio} USD?`,
       [
         { text: 'Cancelar', style: 'cancel' },
-        { 
-          text: 'Comprar', 
+        {
+          text: 'Comprar',
           onPress: async () => {
             try {
               const { error } = await supabase.from('compras').insert({
                 comprador_id: currentUser.id,
                 contenido_id: item.id,
                 monto_pagado: item.precio,
-                tipo_contenido: tabla
+                comision_plataforma: parseFloat((item.precio * 0.2).toFixed(2)),
+                tipo_contenido: tabla,
               });
               if (error) throw error;
               setCompras(prev => [...prev, item.id]);
               Alert.alert('✓ Éxito', 'Contenido desbloqueado');
             } catch (e) {
-              Alert.alert('Error', 'No se pudo procesar la compra. Asegúrate de haber ejecutado el SQL para las columnas "precio".');
+              Alert.alert('Error', e.message);
             }
           }
         }
@@ -131,17 +135,62 @@ export default function HomeScreen({ navigation }) {
     );
   };
 
-  const onRefresh = () => { setRefreshing(true); cargarTodo(); };
-
-  const darLike = async (tabla, id, likesActuales) => {
-    const nuevoValor = likesActuales + 1;
-    await supabase.from(tabla).update({ likes: nuevoValor }).eq('id', id);
-    if (tabla === 'fotos_perfil') setFotos(prev => prev.map(f => f.id === id ? { ...f, likes: nuevoValor } : f));
-    if (tabla === 'opiniones') setOpiniones(prev => prev.map(o => o.id === id ? { ...o, likes: nuevoValor } : o));
-    if (tabla === 'videos') setVideos(prev => prev.map(v => v.id === id ? { ...v, likes: nuevoValor } : v));
-  };
-
   const styles = makeStyles(palette);
+
+  const renderAvatar = (usuario) => (
+    <View style={[styles.avatarPlaceholder, { backgroundColor: palette.primary + '33' }]}>
+      {usuario?.avatar_url
+        ? <Image source={{ uri: usuario.avatar_url }} style={styles.avatarImg} />
+        : <Text style={[styles.avatarInitial, { color: palette.primary }]}>
+            {usuario?.nombre?.[0]?.toUpperCase() || '?'}
+          </Text>
+      }
+    </View>
+  );
+
+  const renderPostHeader = (item, showKlic = true, showPrice = true) => (
+    <View style={styles.postHeader}>
+      {renderAvatar(item.users)}
+      <View style={{ flex: 1 }}>
+        <Text style={styles.postNombre}>{item.users?.nombre || 'Usuario'}</Text>
+        <Text style={styles.postFecha}>
+          {new Date(item.created_at).toLocaleDateString('es-CO', {
+            day: 'numeric', month: 'short'
+          })}
+        </Text>
+      </View>
+      {showPrice && item.precio > 0 && (
+        <View style={[styles.priceTag, { backgroundColor: palette.primary + '30' }]}>
+          <Ionicons name="pricetag" size={12} color={palette.primary} />
+          <Text style={[styles.priceTagText, { color: palette.primary }]}>${item.precio}</Text>
+        </View>
+      )}
+      {showKlic && (
+        <TouchableOpacity style={[styles.klicBtn, { borderColor: palette.primary }]}>
+          <Ionicons name="flash-outline" size={12} color={palette.primary} />
+          <Text style={[styles.klicBtnText, { color: palette.primary }]}>Klic</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+
+  const renderAcciones = (item, tipo) => (
+    <View style={styles.postActions}>
+      <LikeButton contenidoId={item.id} tipo={tipo} />
+      <TouchableOpacity style={styles.actionBtn}>
+        <Ionicons name="hand-left-outline" size={20} color={palette.secondary} />
+        <Text style={[styles.actionCount, { color: palette.secondary }]}>Parcero</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.actionBtn}>
+        <Ionicons name="chatbubble-outline" size={20} color={palette.textMuted} />
+        <Text style={styles.actionCount}>Comentar</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.actionBtn}>
+        <Ionicons name="paper-plane-outline" size={20} color={palette.textMuted} />
+        <Text style={styles.actionCount}>Compartir</Text>
+      </TouchableOpacity>
+    </View>
+  );
 
   const renderFoto = ({ item }) => {
     const esPagado = item.precio > 0;
@@ -151,32 +200,9 @@ export default function HomeScreen({ navigation }) {
 
     return (
       <View style={styles.postCard}>
-        <View style={styles.postHeader}>
-          <View style={[styles.avatarPlaceholder, { backgroundColor: palette.primary + '33' }]}>
-            {item.users?.avatar_url
-              ? <Image source={{ uri: item.users.avatar_url }} style={styles.avatarImg} />
-              : <Text style={[styles.avatarInitial, { color: palette.primary }]}>
-                  {item.users?.nombre?.[0]?.toUpperCase() || '?'}
-                </Text>
-            }
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.postNombre}>{item.users?.nombre || 'Usuario'}</Text>
-            <Text style={styles.postFecha}>
-              {new Date(item.created_at).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })}
-            </Text>
-          </View>
-          {esPagado && (
-            <View style={[styles.priceTag, { backgroundColor: palette.primary + '30' }]}>
-              <Ionicons name="pricetag" size={12} color={palette.primary} />
-              <Text style={[styles.priceTagText, { color: palette.primary }]}>${item.precio}</Text>
-            </View>
-          )}
-        </View>
-
-        <View style={{ position: 'relative', overflow: 'hidden', borderRadius: radii.md }}>
+        {renderPostHeader(item, true, true)}
+        <View style={{ position: 'relative', overflow: 'hidden' }}>
           <Image source={{ uri: item.url }} style={styles.postImage} resizeMode="cover" />
-          
           {bloqueado && (
             <BlurView intensity={120} tint="dark" style={[StyleSheet.absoluteFill, styles.blurContainer]}>
               <View style={styles.lockOverlay}>
@@ -184,9 +210,10 @@ export default function HomeScreen({ navigation }) {
                   <Ionicons name="lock-closed" size={32} color="#fff" />
                 </View>
                 <Text style={styles.blurTitle}>Contenido Premium</Text>
-                <Text style={styles.blurSub}>Este contenido tiene un costo de ${item.precio} USD</Text>
-                
-                <TouchableOpacity 
+                <Text style={styles.blurSub}>
+                  Este contenido tiene un costo de ${item.precio} USD
+                </Text>
+                <TouchableOpacity
                   style={[styles.buyBtnLarge, { backgroundColor: palette.primary }]}
                   onPress={() => comprarContenido(item, 'fotos_perfil')}
                   activeOpacity={0.8}
@@ -198,25 +225,7 @@ export default function HomeScreen({ navigation }) {
             </BlurView>
           )}
         </View>
-
-        <View style={styles.postActions}>
-          <TouchableOpacity style={styles.actionBtn} onPress={() => darLike('fotos_perfil', item.id, item.likes || 0)}>
-            <Ionicons name="flame-outline" size={20} color={palette.primary} />
-            <Text style={[styles.actionCount, { color: palette.primary }]}>{item.likes || 0}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn}>
-            <Ionicons name="hand-left-outline" size={20} color={palette.secondary} />
-            <Text style={[styles.actionCount, { color: palette.secondary }]}>Parcero</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn}>
-            <Ionicons name="chatbubble-outline" size={20} color={palette.textMuted} />
-            <Text style={styles.actionCount}>Comentar</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn}>
-            <Ionicons name="paper-plane-outline" size={20} color={palette.textMuted} />
-            <Text style={styles.actionCount}>Compartir</Text>
-          </TouchableOpacity>
-        </View>
+        {renderAcciones(item, 'foto')}
       </View>
     );
   };
@@ -229,60 +238,25 @@ export default function HomeScreen({ navigation }) {
 
     return (
       <View style={styles.opinionCard}>
-        <View style={styles.postHeader}>
-          <View style={[styles.avatarPlaceholder, { backgroundColor: palette.primary + '33' }]}>
-            {item.users?.avatar_url
-              ? <Image source={{ uri: item.users.avatar_url }} style={styles.avatarImg} />
-              : <Text style={[styles.avatarInitial, { color: palette.primary }]}>
-                  {item.users?.nombre?.[0]?.toUpperCase() || '?'}
-                </Text>
-            }
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.postNombre}>{item.users?.nombre || 'Usuario'}</Text>
-            <Text style={styles.postFecha}>
-              {new Date(item.created_at).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })}
+        {renderPostHeader(item, false, true)}
+        {bloqueado ? (
+          <View style={[styles.opinionBloqueada, { backgroundColor: palette.panelSoft, borderColor: palette.border }]}>
+            <Ionicons name="lock-closed-outline" size={24} color={palette.textMuted} />
+            <Text style={styles.opinionBloqueadaText}>
+              Opinión de pago — ${item.precio} USD
             </Text>
+            <TouchableOpacity
+              style={[styles.buyBtnSmall, { backgroundColor: palette.primary }]}
+              onPress={() => comprarContenido(item, 'opiniones')}
+            >
+              <Ionicons name="cart-outline" size={14} color="#fff" />
+              <Text style={styles.buyBtnTextSmall}>Desbloquear</Text>
+            </TouchableOpacity>
           </View>
-          {esPagado && (
-            <View style={[styles.priceTag, { backgroundColor: palette.primary + '30' }]}>
-              <Ionicons name="pricetag" size={12} color={palette.primary} />
-              <Text style={[styles.priceTagText, { color: palette.primary }]}>${item.precio}</Text>
-            </View>
-          )}
-        </View>
-
-        <View style={{ position: 'relative', minHeight: 60, justifyContent: 'center' }}>
-          <Text style={[styles.opinionTexto, bloqueado && { opacity: 0.1 }]}>
-            {bloqueado ? 'Contenido premium bloqueado por el creador' : item.contenido}
-          </Text>
-          {bloqueado && (
-            <BlurView intensity={40} tint="dark" style={[StyleSheet.absoluteFill, styles.blurContainer, { borderRadius: 0 }]}>
-              <TouchableOpacity 
-                style={[styles.buyBtnSmall, { backgroundColor: palette.primary }]}
-                onPress={() => comprarContenido(item, 'opiniones')}
-              >
-                <Ionicons name="lock-closed" size={14} color="#fff" />
-                <Text style={styles.buyBtnTextSmall}>Desbloquear Opinión (${item.precio})</Text>
-              </TouchableOpacity>
-            </BlurView>
-          )}
-        </View>
-
-        <View style={styles.postActions}>
-          <TouchableOpacity style={styles.actionBtn} onPress={() => darLike('opiniones', item.id, item.likes || 0)}>
-            <Ionicons name="heart-outline" size={20} color={palette.primary} />
-            <Text style={[styles.actionCount, { color: palette.primary }]}>{item.likes || 0}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn}>
-            <Ionicons name="chatbubble-outline" size={20} color={palette.textMuted} />
-            <Text style={styles.actionCount}>Comentar</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn}>
-            <Ionicons name="paper-plane-outline" size={20} color={palette.textMuted} />
-            <Text style={styles.actionCount}>Compartir</Text>
-          </TouchableOpacity>
-        </View>
+        ) : (
+          <Text style={styles.opinionTexto}>{item.contenido}</Text>
+        )}
+        {renderAcciones(item, 'opinion')}
       </View>
     );
   };
@@ -295,76 +269,46 @@ export default function HomeScreen({ navigation }) {
 
     return (
       <View style={styles.videoCard}>
-        <View style={styles.postHeader}>
-          <View style={[styles.avatarPlaceholder, { backgroundColor: palette.primary + '33' }]}>
-            {item.users?.avatar_url
-              ? <Image source={{ uri: item.users.avatar_url }} style={styles.avatarImg} />
-              : <Text style={[styles.avatarInitial, { color: palette.primary }]}>
-                  {item.users?.nombre?.[0]?.toUpperCase() || '?'}
-                </Text>
+        {renderPostHeader(item, true, true)}
+        <View style={{ position: 'relative', overflow: 'hidden' }}>
+          <View style={styles.videoThumb}>
+            {item.thumbnail_url
+              ? <Image source={{ uri: item.thumbnail_url }} style={styles.videoThumbImg} resizeMode="cover" />
+              : <View style={[styles.videoThumbPlaceholder, { backgroundColor: palette.panelSoft }]}>
+                  <Ionicons name="videocam-outline" size={48} color={palette.textMuted} />
+                </View>
             }
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.postNombre}>{item.users?.nombre || 'Usuario'}</Text>
-            <Text style={styles.postFecha}>
-              {new Date(item.created_at).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })}
-            </Text>
-          </View>
-          {esPagado && (
-            <View style={[styles.priceTag, { backgroundColor: palette.primary + '30' }]}>
-              <Ionicons name="pricetag" size={12} color={palette.primary} />
-              <Text style={[styles.priceTagText, { color: palette.primary }]}>${item.precio}</Text>
-            </View>
-          )}
-        </View>
-
-        <View style={styles.videoThumb}>
-          {item.thumbnail_url
-            ? <Image source={{ uri: item.thumbnail_url }} style={styles.videoThumbImg} resizeMode="cover" />
-            : <View style={[styles.videoThumbPlaceholder, { backgroundColor: palette.panelSoft }]}>
-                <Ionicons name="videocam-outline" size={48} color={palette.textMuted} />
+            {!bloqueado && (
+              <View style={styles.playBtn}>
+                <Ionicons name="play-circle" size={56} color="rgba(255,255,255,0.9)" />
               </View>
-          }
-          {!bloqueado && (
-            <View style={styles.playBtn}>
-              <Ionicons name="play-circle" size={56} color="rgba(255,255,255,0.9)" />
-            </View>
-          )}
+            )}
+          </View>
           {bloqueado && (
-            <BlurView intensity={100} tint="dark" style={[StyleSheet.absoluteFill, styles.blurContainer]}>
-              <View style={styles.lockIconBox}>
-                <Ionicons name="videocam" size={24} color="#fff" />
-                <Ionicons name="lock-closed" size={16} color="#fff" style={{ position: 'absolute', bottom: -4, right: -4 }} />
+            <BlurView intensity={120} tint="dark" style={[StyleSheet.absoluteFill, styles.blurContainer]}>
+              <View style={styles.lockOverlay}>
+                <View style={[styles.lockIconBox, { backgroundColor: palette.primary }]}>
+                  <Ionicons name="lock-closed" size={32} color="#fff" />
+                </View>
+                <Text style={styles.blurTitle}>Video Premium</Text>
+                <Text style={styles.blurSub}>${item.precio} USD</Text>
+                <TouchableOpacity
+                  style={[styles.buyBtnLarge, { backgroundColor: palette.primary }]}
+                  onPress={() => comprarContenido(item, 'videos')}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="cart-outline" size={20} color="#fff" />
+                  <Text style={styles.buyBtnTextLarge}>Comprar ahora</Text>
+                </TouchableOpacity>
               </View>
-              <Text style={styles.blurTitle}>Video Premium</Text>
-              <TouchableOpacity 
-                style={[styles.buyBtnSmall, { backgroundColor: palette.primary, marginTop: 12 }]}
-                onPress={() => comprarContenido(item, 'videos')}
-              >
-                <Text style={styles.buyBtnTextSmall}>Desbloquear por ${item.precio}</Text>
-              </TouchableOpacity>
             </BlurView>
           )}
         </View>
-
-        {item.descripcion ? (
-          <Text style={styles.videoDesc}>{item.descripcion}</Text>
-        ) : null}
-
-        <View style={styles.postActions}>
-          <TouchableOpacity style={styles.actionBtn} onPress={() => darLike('videos', item.id, item.likes || 0)}>
-            <Ionicons name="flame-outline" size={20} color={palette.primary} />
-            <Text style={[styles.actionCount, { color: palette.primary }]}>{item.likes || 0}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn}>
-            <Ionicons name="chatbubble-outline" size={20} color={palette.textMuted} />
-            <Text style={styles.actionCount}>Comentar</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn}>
-            <Ionicons name="paper-plane-outline" size={20} color={palette.textMuted} />
-            <Text style={styles.actionCount}>Compartir</Text>
-          </TouchableOpacity>
-        </View>
+        {item.descripcion
+          ? <Text style={styles.videoDesc}>{item.descripcion}</Text>
+          : null
+        }
+        {renderAcciones(item, 'video')}
       </View>
     );
   };
@@ -379,6 +323,7 @@ export default function HomeScreen({ navigation }) {
 
   return (
     <View style={styles.wrapper}>
+
       {/* Top bar */}
       <View style={styles.topBar}>
         <Text style={[styles.logo, { color: palette.primary }]}>⚡ KLIC</Text>
@@ -404,14 +349,17 @@ export default function HomeScreen({ navigation }) {
             </Text>
           </TouchableOpacity>
         ))}
-        {/* Indicador animado */}
         <Animated.View style={[
           styles.tabIndicator,
-          { backgroundColor: palette.primary, width: SCREEN_WIDTH / TABS.length, transform: [{ translateX: tabIndicatorX }] }
+          {
+            backgroundColor: palette.primary,
+            width: SCREEN_WIDTH / TABS.length,
+            transform: [{ translateX: tabIndicatorX }]
+          }
         ]} />
       </View>
 
-      {/* Contenido con swipe */}
+      {/* Contenido */}
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={palette.primary} />
@@ -421,45 +369,45 @@ export default function HomeScreen({ navigation }) {
           style={[styles.slidesContainer, { transform: [{ translateX }] }]}
           {...panResponder.panHandlers}
         >
-          {/* Fotos */}
           <View style={styles.slide}>
             <FlatList
               data={fotos}
               keyExtractor={item => item.id}
               renderItem={renderFoto}
-              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />}
+              refreshControl={
+                <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />
+              }
               ListEmptyComponent={renderVacio('images-outline', 'No hay fotos aún')}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={{ paddingBottom: 16 }}
-              scrollEnabled={true}
             />
           </View>
 
-          {/* Opiniones */}
           <View style={styles.slide}>
             <FlatList
               data={opiniones}
               keyExtractor={item => item.id}
               renderItem={renderOpinion}
-              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />}
+              refreshControl={
+                <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />
+              }
               ListEmptyComponent={renderVacio('chatbubbles-outline', 'No hay opiniones aún')}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={{ paddingBottom: 16 }}
-              scrollEnabled={true}
             />
           </View>
 
-          {/* Videos */}
           <View style={styles.slide}>
             <FlatList
               data={videos}
               keyExtractor={item => item.id}
               renderItem={renderVideo}
-              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />}
+              refreshControl={
+                <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />
+              }
               ListEmptyComponent={renderVacio('videocam-outline', 'No hay videos aún')}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={{ paddingBottom: 16 }}
-              scrollEnabled={true}
             />
           </View>
         </Animated.View>
@@ -486,10 +434,7 @@ const makeStyles = (palette) => StyleSheet.create({
     flexDirection: 'row', position: 'relative',
     borderBottomWidth: 1, borderBottomColor: palette.border,
   },
-  tab: {
-    flex: 1, paddingVertical: 13,
-    alignItems: 'center',
-  },
+  tab: { flex: 1, paddingVertical: 13, alignItems: 'center' },
   tabText: { color: palette.textMuted, fontSize: 14, fontWeight: '600' },
   tabIndicator: {
     position: 'absolute', bottom: 0, left: 0,
@@ -502,7 +447,6 @@ const makeStyles = (palette) => StyleSheet.create({
   },
   slide: { width: SCREEN_WIDTH, flex: 1 },
 
-  // Post
   postCard: {
     backgroundColor: palette.panel,
     borderBottomWidth: 1, borderBottomColor: palette.border,
@@ -520,7 +464,7 @@ const makeStyles = (palette) => StyleSheet.create({
   avatarInitial: { fontSize: 18, fontWeight: '800' },
   postNombre: { color: palette.text, fontWeight: '700', fontSize: 14 },
   postFecha: { color: palette.textMuted, fontSize: 12 },
-  
+
   priceTag: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     paddingHorizontal: 8, paddingVertical: 4, borderRadius: radii.sm,
@@ -533,11 +477,12 @@ const makeStyles = (palette) => StyleSheet.create({
     paddingHorizontal: 10, paddingVertical: 5,
   },
   klicBtnText: { fontSize: 12, fontWeight: '700' },
+
   postImage: { width: '100%', height: 340 },
 
   blurContainer: {
     justifyContent: 'center', alignItems: 'center',
-    backgroundColor: 'rgba(7, 7, 11, 0.95)', // Fondo casi sólido para tapar la foto
+    backgroundColor: 'rgba(7,7,11,0.95)',
   },
   lockOverlay: {
     alignItems: 'center', justifyContent: 'center',
@@ -550,26 +495,16 @@ const makeStyles = (palette) => StyleSheet.create({
     shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 10, elevation: 12,
   },
   blurTitle: { color: '#fff', fontSize: 22, fontWeight: '900', marginBottom: 6 },
-  blurSub: { color: 'rgba(255,255,255,0.8)', fontSize: 14, marginBottom: 24, textAlign: 'center' },
-  
+  blurSub: {
+    color: 'rgba(255,255,255,0.8)', fontSize: 14,
+    marginBottom: 24, textAlign: 'center',
+  },
   buyBtnLarge: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingHorizontal: 32, paddingVertical: 16, borderRadius: radii.pill,
     shadowOpacity: 0.4, shadowRadius: 15, elevation: 8,
   },
   buyBtnTextLarge: { color: '#fff', fontWeight: '900', fontSize: 16 },
-
-  buyBtn: {
-    paddingHorizontal: 24, paddingVertical: 12, borderRadius: radii.pill,
-    shadowOpacity: 0.3, shadowRadius: 8, elevation: 4,
-  },
-  buyBtnText: { color: '#fff', fontWeight: '800', fontSize: 14 },
-  
-  buyBtnSmall: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 16, paddingVertical: 8, borderRadius: radii.pill,
-  },
-  buyBtnTextSmall: { color: '#fff', fontWeight: '700', fontSize: 12 },
 
   postActions: {
     flexDirection: 'row', paddingHorizontal: 8,
@@ -581,7 +516,6 @@ const makeStyles = (palette) => StyleSheet.create({
   },
   actionCount: { color: palette.textMuted, fontSize: 12, fontWeight: '600' },
 
-  // Opinión
   opinionCard: {
     backgroundColor: palette.panel,
     borderBottomWidth: 1, borderBottomColor: palette.border,
@@ -589,11 +523,23 @@ const makeStyles = (palette) => StyleSheet.create({
   },
   opinionTexto: {
     color: palette.text, fontSize: 15,
-    lineHeight: 22, paddingHorizontal: 16,
-    paddingBottom: 12,
+    lineHeight: 22, paddingHorizontal: 16, paddingBottom: 12,
   },
+  opinionBloqueada: {
+    flexDirection: 'row', alignItems: 'center',
+    gap: 10, margin: 12, padding: 14,
+    borderRadius: radii.md, borderWidth: 1,
+  },
+  opinionBloqueadaText: {
+    flex: 1, color: palette.textMuted,
+    fontSize: 13, fontWeight: '600',
+  },
+  buyBtnSmall: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: radii.pill,
+  },
+  buyBtnTextSmall: { color: '#fff', fontWeight: '700', fontSize: 12 },
 
-  // Video
   videoCard: {
     backgroundColor: palette.panel,
     borderBottomWidth: 1, borderBottomColor: palette.border,
@@ -618,7 +564,6 @@ const makeStyles = (palette) => StyleSheet.create({
     paddingHorizontal: 16, paddingBottom: 8,
   },
 
-  // Empty
   emptyBox: {
     alignItems: 'center', padding: 48,
     margin: 20, gap: 8,

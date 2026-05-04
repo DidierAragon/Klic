@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, Image, TouchableOpacity,
   ActivityIndicator, RefreshControl, FlatList,
-  Dimensions, Animated, PanResponder, Share, Alert
+  Share, Alert
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,62 +12,13 @@ import LikeButton from '../../components/LikeButton';
 import { radii } from '../../theme/ui';
 import { useTema } from '../../context/TemaContext';
 
-const SCREEN_WIDTH = Dimensions.get('window').width;
-const TABS = ['Fotos', 'Opiniones', 'Videos'];
-
 export default function HomeScreen({ navigation }) {
   const { palette } = useTema();
-  const [tabIndex, setTabIndex] = useState(0);
-  const [fotos, setFotos] = useState([]);
-  const [opiniones, setOpiniones] = useState([]);
-  const [videos, setVideos] = useState([]);
+  const [publicaciones, setPublicaciones] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [compras, setCompras] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-
-  const translateX = useRef(new Animated.Value(0)).current;
-  const tabIndicatorX = useRef(new Animated.Value(0)).current;
-
-  const animarATab = (idx) => {
-    Animated.parallel([
-      Animated.spring(translateX, {
-        toValue: -idx * SCREEN_WIDTH,
-        useNativeDriver: true,
-        tension: 100, friction: 12,
-      }),
-      Animated.spring(tabIndicatorX, {
-        toValue: idx * (SCREEN_WIDTH / TABS.length),
-        useNativeDriver: true,
-        tension: 100, friction: 12,
-      }),
-    ]).start();
-    setTabIndex(idx);
-  };
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, g) =>
-        Math.abs(g.dx) > Math.abs(g.dy) * 1.5 && Math.abs(g.dx) > 10,
-      onPanResponderMove: (_, g) => {
-        translateX.setValue(-tabIndex * SCREEN_WIDTH + g.dx);
-      },
-      onPanResponderRelease: (_, g) => {
-        if (g.dx < -50 && tabIndex < TABS.length - 1) {
-          animarATab(tabIndex + 1);
-        } else if (g.dx > 50 && tabIndex > 0) {
-          animarATab(tabIndex - 1);
-        } else {
-          Animated.spring(translateX, {
-            toValue: -tabIndex * SCREEN_WIDTH,
-            useNativeDriver: true,
-            tension: 100, friction: 12,
-          }).start();
-        }
-      },
-    })
-  ).current;
 
   const cargarTodo = useCallback(async () => {
     try {
@@ -89,9 +40,13 @@ export default function HomeScreen({ navigation }) {
           : Promise.resolve({ data: [] }),
       ]);
 
-      setFotos(f || []);
-      setOpiniones(o || []);
-      setVideos(v || []);
+      const feedUnificado = [
+        ...(f || []).map(item => ({ ...item, __tipo: 'foto', __tabla: 'fotos_perfil' })),
+        ...(o || []).map(item => ({ ...item, __tipo: 'opinion', __tabla: 'opiniones' })),
+        ...(v || []).map(item => ({ ...item, __tipo: 'video', __tabla: 'videos' })),
+      ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+      setPublicaciones(feedUnificado);
       setCompras((c || []).map(item => item.contenido_id));
     } catch (e) {
       console.warn(e);
@@ -383,97 +338,31 @@ export default function HomeScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
-      {/* Tabs */}
-      <View style={styles.tabsRow}>
-        {TABS.map((tab, i) => (
-          <TouchableOpacity
-            key={tab}
-            style={styles.tab}
-            onPress={() => animarATab(i)}
-            activeOpacity={0.7}
-          >
-            <Text style={[
-              styles.tabText,
-              tabIndex === i && { color: palette.primary, fontWeight: '700' }
-            ]}>
-              {tab}
-            </Text>
-          </TouchableOpacity>
-        ))}
-        <Animated.View style={[
-          styles.tabIndicator,
-          {
-            backgroundColor: palette.primary,
-            width: SCREEN_WIDTH / TABS.length,
-            transform: [{ translateX: tabIndicatorX }]
-          }
-        ]} />
-      </View>
-
-      {/* Contenido */}
+      {/* Feed unificado */}
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={palette.primary} />
         </View>
       ) : (
-        <Animated.View
-          style={[styles.slidesContainer, { transform: [{ translateX }] }]}
-          {...panResponder.panHandlers}
-        >
-          <View style={styles.slide}>
-            <FlatList
-              data={fotos}
-              keyExtractor={item => item.id}
-              renderItem={renderFoto}
-              refreshControl={
-                <RefreshControl
-                  refreshing={refreshing}
-                  onRefresh={onRefresh}
-                  tintColor={palette.primary}
-                />
-              }
-              ListEmptyComponent={renderVacio('images-outline', 'No hay fotos aún')}
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingBottom: 16 }}
+        <FlatList
+          data={publicaciones}
+          keyExtractor={item => `${item.__tipo}-${item.id}`}
+          renderItem={({ item }) => {
+            if (item.__tipo === 'foto') return renderFoto({ item });
+            if (item.__tipo === 'opinion') return renderOpinion({ item });
+            return renderVideo({ item });
+          }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={palette.primary}
             />
-          </View>
-
-          <View style={styles.slide}>
-            <FlatList
-              data={opiniones}
-              keyExtractor={item => item.id}
-              renderItem={renderOpinion}
-              refreshControl={
-                <RefreshControl
-                  refreshing={refreshing}
-                  onRefresh={onRefresh}
-                  tintColor={palette.primary}
-                />
-              }
-              ListEmptyComponent={renderVacio('chatbubbles-outline', 'No hay opiniones aún')}
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingBottom: 16 }}
-            />
-          </View>
-
-          <View style={styles.slide}>
-            <FlatList
-              data={videos}
-              keyExtractor={item => item.id}
-              renderItem={renderVideo}
-              refreshControl={
-                <RefreshControl
-                  refreshing={refreshing}
-                  onRefresh={onRefresh}
-                  tintColor={palette.primary}
-                />
-              }
-              ListEmptyComponent={renderVacio('videocam-outline', 'No hay videos aún')}
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingBottom: 16 }}
-            />
-          </View>
-        </Animated.View>
+          }
+          ListEmptyComponent={renderVacio('newspaper-outline', 'No hay publicaciones aún')}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: 16 }}
+        />
       )}
 
       <MainMenu navigation={navigation} active="Home" />
@@ -492,23 +381,6 @@ const makeStyles = (palette) => StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: palette.border,
   },
   logo: { fontSize: 22, fontWeight: '900', letterSpacing: 2 },
-
-  tabsRow: {
-    flexDirection: 'row', position: 'relative',
-    borderBottomWidth: 1, borderBottomColor: palette.border,
-  },
-  tab: { flex: 1, paddingVertical: 13, alignItems: 'center' },
-  tabText: { color: palette.textMuted, fontSize: 14, fontWeight: '600' },
-  tabIndicator: {
-    position: 'absolute', bottom: 0, left: 0,
-    height: 2, borderRadius: 2,
-  },
-
-  slidesContainer: {
-    flex: 1, flexDirection: 'row',
-    width: SCREEN_WIDTH * TABS.length,
-  },
-  slide: { width: SCREEN_WIDTH, flex: 1 },
 
   postCard: {
     backgroundColor: palette.panel,

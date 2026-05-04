@@ -12,6 +12,8 @@ import ProfileScreen from './src/screens/Profile/ProfileScreen';
 import SettingsScreen from './src/screens/Settings/SettingsScreen';
 import { supabase } from './src/services/supabase';
 import ComentariosScreen from './src/screens/Comments/ComentariosScreen';
+import MatchesScreen from './src/screens/Chat/MatchesScreen';
+import ChatScreen from './src/screens/Chat/ChatScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -26,6 +28,8 @@ function Navigation({ session }) {
           <Stack.Screen name="UploadPhoto" component={UploadPhotoScreen} />
           <Stack.Screen name="Profile" component={ProfileScreen} />
           <Stack.Screen name="Settings" component={SettingsScreen} />
+          <Stack.Screen name="Matches" component={MatchesScreen} />
+          <Stack.Screen name="Chat" component={ChatScreen} />
         </Stack.Navigator>
       ) : (
         <Stack.Navigator initialRouteName="Login" screenOptions={{ headerShown: false }}>

@@ -18,12 +18,12 @@ export default function LikeButton({ contenidoId, tipo }) {
         <ActivityIndicator size="small" color={palette.primary} />
       ) : (
         <Ionicons
-          name={liked ? 'flame' : 'flame-outline'}
+          name={liked ? 'heart' : 'heart-outline'}
           size={20}
-          color={liked ? palette.primary : palette.textMuted}
+          color={liked ? '#fb7185' : palette.textMuted}
         />
       )}
-      <Text style={[styles.count, { color: liked ? palette.primary : palette.textMuted }]}>
+      <Text style={[styles.count, { color: liked ? '#fb7185' : palette.textMuted }]}>
         {count}
       </Text>
     </TouchableOpacity>

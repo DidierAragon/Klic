@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, Image, TouchableOpacity,
   ActivityIndicator, RefreshControl, FlatList,
-  Dimensions, Animated, PanResponder, TextInput, Alert
+  Dimensions, Animated, PanResponder, Share, Alert
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
@@ -135,6 +135,29 @@ export default function HomeScreen({ navigation }) {
     );
   };
 
+  const compartir = async (item, tipo) => {
+    try {
+      const mensaje = tipo === 'opinion'
+        ? `"${item.contenido}" — ${item.users?.nombre || 'Usuario'} en Klic ⚡`
+        : `Mira este contenido de ${item.users?.nombre || 'alguien'} en Klic ⚡\n${item.url}`;
+
+      await Share.share({
+        message: mensaje,
+        title: 'Compartir desde Klic',
+      });
+    } catch (e) {
+      console.warn(e);
+    }
+  };
+
+  const abrirComentarios = (item, tipo) => {
+    navigation.navigate('Comentarios', {
+      contenidoId: item.id,
+      tipo,
+      autor: item.users?.nombre || 'Usuario',
+    });
+  };
+
   const styles = makeStyles(palette);
 
   const renderAvatar = (usuario) => (
@@ -148,7 +171,7 @@ export default function HomeScreen({ navigation }) {
     </View>
   );
 
-  const renderPostHeader = (item, showKlic = true, showPrice = true) => (
+  const renderPostHeader = (item) => (
     <View style={styles.postHeader}>
       {renderAvatar(item.users)}
       <View style={{ flex: 1 }}>
@@ -159,33 +182,46 @@ export default function HomeScreen({ navigation }) {
           })}
         </Text>
       </View>
-      {showPrice && item.precio > 0 && (
+      {item.precio > 0 && (
         <View style={[styles.priceTag, { backgroundColor: palette.primary + '30' }]}>
           <Ionicons name="pricetag" size={12} color={palette.primary} />
           <Text style={[styles.priceTagText, { color: palette.primary }]}>${item.precio}</Text>
         </View>
       )}
-      {showKlic && (
-        <TouchableOpacity style={[styles.klicBtn, { borderColor: palette.primary }]}>
-          <Ionicons name="flash-outline" size={12} color={palette.primary} />
-          <Text style={[styles.klicBtnText, { color: palette.primary }]}>Klic</Text>
-        </TouchableOpacity>
-      )}
+      <TouchableOpacity style={[styles.klicBtn, { borderColor: palette.primary }]}>
+        <Ionicons name="flash-outline" size={12} color={palette.primary} />
+        <Text style={[styles.klicBtnText, { color: palette.primary }]}>Klic</Text>
+      </TouchableOpacity>
     </View>
   );
 
   const renderAcciones = (item, tipo) => (
     <View style={styles.postActions}>
+      {/* Like con corazón */}
       <LikeButton contenidoId={item.id} tipo={tipo} />
+
+      {/* Amigo */}
       <TouchableOpacity style={styles.actionBtn}>
-        <Ionicons name="hand-left-outline" size={20} color={palette.secondary} />
-        <Text style={[styles.actionCount, { color: palette.secondary }]}>Parcero</Text>
+        <Ionicons name="people-outline" size={20} color={palette.secondary} />
+        <Text style={[styles.actionCount, { color: palette.secondary }]}>Amigo</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={styles.actionBtn}>
+
+      {/* Comentar */}
+      <TouchableOpacity
+        style={styles.actionBtn}
+        onPress={() => abrirComentarios(item, tipo)}
+        activeOpacity={0.7}
+      >
         <Ionicons name="chatbubble-outline" size={20} color={palette.textMuted} />
         <Text style={styles.actionCount}>Comentar</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={styles.actionBtn}>
+
+      {/* Compartir */}
+      <TouchableOpacity
+        style={styles.actionBtn}
+        onPress={() => compartir(item, tipo)}
+        activeOpacity={0.7}
+      >
         <Ionicons name="paper-plane-outline" size={20} color={palette.textMuted} />
         <Text style={styles.actionCount}>Compartir</Text>
       </TouchableOpacity>
@@ -200,11 +236,15 @@ export default function HomeScreen({ navigation }) {
 
     return (
       <View style={styles.postCard}>
-        {renderPostHeader(item, true, true)}
+        {renderPostHeader(item)}
         <View style={{ position: 'relative', overflow: 'hidden' }}>
           <Image source={{ uri: item.url }} style={styles.postImage} resizeMode="cover" />
           {bloqueado && (
-            <BlurView intensity={120} tint="dark" style={[StyleSheet.absoluteFill, styles.blurContainer]}>
+            <BlurView
+              intensity={120}
+              tint="dark"
+              style={[StyleSheet.absoluteFill, styles.blurContainer]}
+            >
               <View style={styles.lockOverlay}>
                 <View style={[styles.lockIconBox, { backgroundColor: palette.primary }]}>
                   <Ionicons name="lock-closed" size={32} color="#fff" />
@@ -238,9 +278,12 @@ export default function HomeScreen({ navigation }) {
 
     return (
       <View style={styles.opinionCard}>
-        {renderPostHeader(item, false, true)}
+        {renderPostHeader(item)}
         {bloqueado ? (
-          <View style={[styles.opinionBloqueada, { backgroundColor: palette.panelSoft, borderColor: palette.border }]}>
+          <View style={[styles.opinionBloqueada, {
+            backgroundColor: palette.panelSoft,
+            borderColor: palette.border
+          }]}>
             <Ionicons name="lock-closed-outline" size={24} color={palette.textMuted} />
             <Text style={styles.opinionBloqueadaText}>
               Opinión de pago — ${item.precio} USD
@@ -269,11 +312,15 @@ export default function HomeScreen({ navigation }) {
 
     return (
       <View style={styles.videoCard}>
-        {renderPostHeader(item, true, true)}
+        {renderPostHeader(item)}
         <View style={{ position: 'relative', overflow: 'hidden' }}>
           <View style={styles.videoThumb}>
             {item.thumbnail_url
-              ? <Image source={{ uri: item.thumbnail_url }} style={styles.videoThumbImg} resizeMode="cover" />
+              ? <Image
+                  source={{ uri: item.thumbnail_url }}
+                  style={styles.videoThumbImg}
+                  resizeMode="cover"
+                />
               : <View style={[styles.videoThumbPlaceholder, { backgroundColor: palette.panelSoft }]}>
                   <Ionicons name="videocam-outline" size={48} color={palette.textMuted} />
                 </View>
@@ -285,7 +332,11 @@ export default function HomeScreen({ navigation }) {
             )}
           </View>
           {bloqueado && (
-            <BlurView intensity={120} tint="dark" style={[StyleSheet.absoluteFill, styles.blurContainer]}>
+            <BlurView
+              intensity={120}
+              tint="dark"
+              style={[StyleSheet.absoluteFill, styles.blurContainer]}
+            >
               <View style={styles.lockOverlay}>
                 <View style={[styles.lockIconBox, { backgroundColor: palette.primary }]}>
                   <Ionicons name="lock-closed" size={32} color="#fff" />
@@ -375,7 +426,11 @@ export default function HomeScreen({ navigation }) {
               keyExtractor={item => item.id}
               renderItem={renderFoto}
               refreshControl={
-                <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  tintColor={palette.primary}
+                />
               }
               ListEmptyComponent={renderVacio('images-outline', 'No hay fotos aún')}
               showsVerticalScrollIndicator={false}
@@ -389,7 +444,11 @@ export default function HomeScreen({ navigation }) {
               keyExtractor={item => item.id}
               renderItem={renderOpinion}
               refreshControl={
-                <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  tintColor={palette.primary}
+                />
               }
               ListEmptyComponent={renderVacio('chatbubbles-outline', 'No hay opiniones aún')}
               showsVerticalScrollIndicator={false}
@@ -403,7 +462,11 @@ export default function HomeScreen({ navigation }) {
               keyExtractor={item => item.id}
               renderItem={renderVideo}
               refreshControl={
-                <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  tintColor={palette.primary}
+                />
               }
               ListEmptyComponent={renderVacio('videocam-outline', 'No hay videos aún')}
               showsVerticalScrollIndicator={false}
@@ -492,7 +555,8 @@ const makeStyles = (palette) => StyleSheet.create({
     width: 70, height: 70, borderRadius: 35,
     justifyContent: 'center', alignItems: 'center',
     marginBottom: 16,
-    shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 10, elevation: 12,
+    shadowColor: '#000', shadowOpacity: 0.5,
+    shadowRadius: 10, elevation: 12,
   },
   blurTitle: { color: '#fff', fontSize: 22, fontWeight: '900', marginBottom: 6 },
   blurSub: {
@@ -501,7 +565,8 @@ const makeStyles = (palette) => StyleSheet.create({
   },
   buyBtnLarge: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 32, paddingVertical: 16, borderRadius: radii.pill,
+    paddingHorizontal: 32, paddingVertical: 16,
+    borderRadius: radii.pill,
     shadowOpacity: 0.4, shadowRadius: 15, elevation: 8,
   },
   buyBtnTextLarge: { color: '#fff', fontWeight: '900', fontSize: 16 },
@@ -536,7 +601,8 @@ const makeStyles = (palette) => StyleSheet.create({
   },
   buyBtnSmall: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: 14, paddingVertical: 8, borderRadius: radii.pill,
+    paddingHorizontal: 14, paddingVertical: 8,
+    borderRadius: radii.pill,
   },
   buyBtnTextSmall: { color: '#fff', fontWeight: '700', fontSize: 12 },
 
@@ -548,7 +614,6 @@ const makeStyles = (palette) => StyleSheet.create({
   videoThumb: {
     width: '100%', height: 220,
     justifyContent: 'center', alignItems: 'center',
-    position: 'relative',
   },
   videoThumbImg: { width: '100%', height: '100%' },
   videoThumbPlaceholder: {

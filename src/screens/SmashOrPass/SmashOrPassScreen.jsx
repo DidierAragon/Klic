@@ -276,16 +276,16 @@ export default function SmashOrPassScreen({ navigation }) {
           <Text style={styles.btnSmashText}>Smash</Text>
         </TouchableOpacity>
 
-        {/* Parcero */}
+        {/* Amigo */}
         <TouchableOpacity
-          style={[styles.btnParcero, { borderColor: palette.secondary }]}
-          onPress={() => votar('parcero')}
+          style={[styles.btnAmigo, { borderColor: palette.secondary }]}
+          onPress={() => votar('amigo')}
           disabled={votando}
           activeOpacity={0.8}
         >
-          <Ionicons name="hand-left-outline" size={32} color={palette.secondary} />
-          <Text style={[styles.btnParceroText, { color: palette.secondary }]}>Parcero</Text>
-        </TouchableOpacity>
+          <Ionicons name="people-outline" size={32} color={palette.secondary} />
+          <Text style={[styles.btnAmigoText, { color: palette.secondary }]}>Amigo</Text>
+        </TouchableOpacity> 
       </View>
 
       <Text style={styles.hint}>← Desliza para votar →</Text>
@@ -373,13 +373,12 @@ const makeStyles = (palette) => StyleSheet.create({
   },
   btnSmashText: { color: '#fff', fontSize: 11, fontWeight: '800' },
 
-  btnParcero: {
+  btnAmigo: {
     alignItems: 'center', justifyContent: 'center',
     width: 72, height: 72, borderRadius: 36,
-    backgroundColor: palette.panel,
-    borderWidth: 1.5, gap: 2,
+    backgroundColor: palette.panel, borderWidth: 1.5, gap: 2,
   },
-  btnParceroText: { fontSize: 10, fontWeight: '700' },
+  btnAmigoText: { fontSize: 10, fontWeight: '700' },
 
   hint: { color: palette.textMuted, fontSize: 11, textAlign: 'center', paddingBottom: 6 },
 

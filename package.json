@@ -4,8 +4,8 @@
   "main": "index.js",
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "web": "expo start --web"
   },
   "dependencies": {
@@ -13,10 +13,12 @@
     "@react-navigation/native": "^7.2.2",
     "@react-navigation/native-stack": "^7.14.11",
     "@react-navigation/stack": "^7.8.10",
+    "@stripe/stripe-react-native": "0.50.3",
     "@supabase/supabase-js": "^2.104.0",
     "expo": "^54.0.34",
     "expo-blur": "~15.0.8",
     "expo-camera": "~17.0.10",
+    "expo-dev-client": "~6.0.21",
     "expo-file-system": "~19.0.21",
     "expo-image-picker": "~17.0.10",
     "expo-status-bar": "~3.0.9",
@@ -26,5 +28,9 @@
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "@types/react": "~19.1.10",
+    "typescript": "~5.9.2"
+  }
 }

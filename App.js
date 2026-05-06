@@ -14,6 +14,10 @@ import { supabase } from './src/services/supabase';
 import ComentariosScreen from './src/screens/Comments/ComentariosScreen';
 import MatchesScreen from './src/screens/Chat/MatchesScreen';
 import ChatScreen from './src/screens/Chat/ChatScreen';
+import { StripeProvider } from '@stripe/stripe-react-native';
+
+// Se usa la llave desde el archivo .env
+const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY;
 
 const Stack = createNativeStackNavigator();
 
@@ -69,8 +73,13 @@ export default function App() {
   }
 
   return (
-    <TemaProvider>
-      <Navigation session={session} />
-    </TemaProvider>
+    <StripeProvider 
+      publishableKey={STRIPE_PUBLISHABLE_KEY}
+      urlScheme="klic-app"
+    >
+      <TemaProvider>
+        <Navigation session={session} />
+      </TemaProvider>
+    </StripeProvider>
   );
 }

@@ -6,6 +6,7 @@ import {
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
+import { useStripe } from '@stripe/stripe-react-native';
 import { supabase } from '../../services/supabase';
 import MainMenu from '../../components/MainMenu';
 import LikeButton from '../../components/LikeButton';
@@ -19,6 +20,7 @@ export default function HomeScreen({ navigation }) {
   const [compras, setCompras] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const { initPaymentSheet, presentPaymentSheet } = useStripe();
 
   const cargarTodo = useCallback(async () => {
     try {
@@ -62,32 +64,40 @@ export default function HomeScreen({ navigation }) {
 
   const comprarContenido = async (item, tabla) => {
     if (!currentUser) return Alert.alert('Error', 'Debes iniciar sesión');
-    Alert.alert(
-      'Confirmar compra',
-      `¿Deseas comprar este contenido por $${item.precio} USD?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Comprar',
-          onPress: async () => {
-            try {
-              const { error } = await supabase.from('compras').insert({
-                comprador_id: currentUser.id,
-                contenido_id: item.id,
-                monto_pagado: item.precio,
-                comision_plataforma: parseFloat((item.precio * 0.2).toFixed(2)),
-                tipo_contenido: tabla,
-              });
-              if (error) throw error;
-              setCompras(prev => [...prev, item.id]);
-              Alert.alert('✓ Éxito', 'Contenido desbloqueado');
-            } catch (e) {
-              Alert.alert('Error', e.message);
-            }
-          }
+    try {
+      setLoading(true);
+      const { data, error: functionError } = await supabase.functions.invoke('create-payment-intent', {
+        body: { 
+          contentId: item.id, 
+          contentType: tabla, 
+          price: item.precio,
+          authorId: item.user_id 
         }
-      ]
-    );
+      });
+      if (functionError || !data?.clientSecret) {
+        throw new Error(functionError?.message || 'No se pudo iniciar el pago');
+      }
+
+      const { error: initError } = await initPaymentSheet({
+        paymentIntentClientSecret: data.clientSecret,
+        merchantDisplayName: 'Klic App',
+        allowsDelayedPaymentMethods: true,
+      });
+      if (initError) throw initError;
+
+      const { error: paymentError } = await presentPaymentSheet();
+      if (paymentError) {
+        if (paymentError.code === 'Canceled') return;
+        throw paymentError;
+      }
+
+      setCompras(prev => [...prev, item.id]);
+      Alert.alert('✓ Pago en proceso', 'Tu contenido se desbloqueará en unos segundos.');
+    } catch (e) {
+      Alert.alert('Error de Pago', e.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const compartir = async (item, tipo) => {

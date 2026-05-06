@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { ActivityIndicator, View } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { TemaProvider } from './src/context/TemaContext';
+import FAB from './src/components/FAB';
 import LoginScreen from './src/screens/Auth/LoginScreen';
 import RegisterScreen from './src/screens/Auth/RegisterScreen';
 import HomeScreen from './src/screens/Home/HomeScreen';
@@ -10,38 +11,61 @@ import SmashOrPassScreen from './src/screens/SmashOrPass/SmashOrPassScreen';
 import UploadPhotoScreen from './src/screens/Profile/UploadPhotoScreen';
 import ProfileScreen from './src/screens/Profile/ProfileScreen';
 import SettingsScreen from './src/screens/Settings/SettingsScreen';
-import { supabase } from './src/services/supabase';
-import ComentariosScreen from './src/screens/Comments/ComentariosScreen';
 import MatchesScreen from './src/screens/Chat/MatchesScreen';
 import ChatScreen from './src/screens/Chat/ChatScreen';
-import { StripeProvider } from '@stripe/stripe-react-native';
+import ComentariosScreen from './src/screens/Comments/ComentariosScreen';
+import SocialScreen from './src/screens/Social/SocialScreen';
+import { supabase } from './src/services/supabase';
 
-// Se usa la llave desde el archivo .env
-const STRIPE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+import ChatAmigoScreen from './src/screens/Chat/ChatAmigoScreen';
+
 
 const Stack = createNativeStackNavigator();
 
-function Navigation({ session }) {
+// Pantallas donde NO mostrar el FAB
+const SIN_FAB = ['UploadPhoto', 'Chat', 'Comentarios', 'Login', 'Register'];
+
+function AppInner({ session }) {
+  const navigationRef = useNavigationContainerRef();
+  const [rutaActual, setRutaActual] = useState('Home');
+
+  const mostrarFAB = session && !SIN_FAB.includes(rutaActual);
+
   return (
-    <NavigationContainer>
-      {session ? (
-        <Stack.Navigator initialRouteName="Home" screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="Home" component={HomeScreen} />
-          <Stack.Screen name="SmashOrPass" component={SmashOrPassScreen} />
-          <Stack.Screen name="Comentarios" component={ComentariosScreen} />
-          <Stack.Screen name="UploadPhoto" component={UploadPhotoScreen} />
-          <Stack.Screen name="Profile" component={ProfileScreen} />
-          <Stack.Screen name="Settings" component={SettingsScreen} />
-          <Stack.Screen name="Matches" component={MatchesScreen} />
-          <Stack.Screen name="Chat" component={ChatScreen} />
-        </Stack.Navigator>
-      ) : (
-        <Stack.Navigator initialRouteName="Login" screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="Login" component={LoginScreen} />
-          <Stack.Screen name="Register" component={RegisterScreen} />
-        </Stack.Navigator>
+    <>
+      <NavigationContainer
+        ref={navigationRef}
+        onStateChange={() => {
+          const nombre = navigationRef.getCurrentRoute()?.name;
+          if (nombre) setRutaActual(nombre);
+        }}
+      >
+        {session ? (
+          <Stack.Navigator initialRouteName="Home" screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="Home" component={HomeScreen} />
+            <Stack.Screen name="SmashOrPass" component={SmashOrPassScreen} />
+            <Stack.Screen name="Social" component={SocialScreen} />
+            <Stack.Screen name="Matches" component={MatchesScreen} />
+            <Stack.Screen name="Profile" component={ProfileScreen} />
+            <Stack.Screen name="Settings" component={SettingsScreen} />
+            <Stack.Screen name="UploadPhoto" component={UploadPhotoScreen} />
+            <Stack.Screen name="Chat" component={ChatScreen} />
+            <Stack.Screen name="Comentarios" component={ComentariosScreen} />
+            <Stack.Screen name="ChatAmigo" component={ChatAmigoScreen} />
+          </Stack.Navigator>
+        ) : (
+          <Stack.Navigator initialRouteName="Login" screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="Login" component={LoginScreen} />
+            <Stack.Screen name="Register" component={RegisterScreen} />
+          </Stack.Navigator>
+        )}
+      </NavigationContainer>
+
+      {/* FAB global */}
+      {mostrarFAB && (
+        <FAB navigation={navigationRef} />
       )}
-    </NavigationContainer>
+    </>
   );
 }
 
@@ -73,13 +97,8 @@ export default function App() {
   }
 
   return (
-    <StripeProvider 
-      publishableKey={STRIPE_PUBLISHABLE_KEY}
-      urlScheme="klic-app"
-    >
-      <TemaProvider>
-        <Navigation session={session} />
-      </TemaProvider>
-    </StripeProvider>
+    <TemaProvider>
+      <AppInner session={session} />
+    </TemaProvider>
   );
 }

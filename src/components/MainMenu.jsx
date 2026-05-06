@@ -7,11 +7,11 @@ import { radii } from '../theme/ui';
 import { useTema } from '../context/TemaContext';
 
 const ITEMS = [
-  { key: 'Home',        label: 'Inicio',   icon: 'home-outline',          iconActive: 'home' },
-  { key: 'SmashOrPass', label: 'Klic',     icon: 'flash-outline',         iconActive: 'flash' },
-  { key: 'Matches',     label: 'Matches',  icon: 'heart-outline',         iconActive: 'heart' },
-  { key: 'Profile',     label: 'Perfil',   icon: 'person-outline',        iconActive: 'person' },
-  { key: 'Settings',    label: 'Ajustes',  icon: 'settings-outline',      iconActive: 'settings' },
+  { key: 'Home',     label: 'Inicio',   icon: 'home-outline',          iconActive: 'home' },
+  { key: 'SmashOrPass', label: 'Klic',  icon: 'flash-outline',         iconActive: 'flash' },
+  { key: 'Social',   label: 'Social',   icon: 'chatbubbles-outline',   iconActive: 'chatbubbles' },
+  { key: 'Matches',  label: 'Matches',  icon: 'heart-outline',         iconActive: 'heart' },
+  { key: 'Profile',  label: 'Perfil',   icon: 'person-outline',        iconActive: 'person' },
 ];
 
 function NavItem({ item, isActive, onPress, palette }) {

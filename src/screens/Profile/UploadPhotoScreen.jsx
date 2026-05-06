@@ -16,9 +16,9 @@ const TIPOS = [
   { key: 'video',   label: 'Video',   icon: 'videocam-outline' },
 ];
 
-export default function UploadPhotoScreen({ navigation }) {
+export default function UploadPhotoScreen({ navigation, route }) {
   const { palette, glow } = useTema();
-  const [tipo, setTipo] = useState('foto');
+  const [tipo, setTipo] = useState(route?.params?.tipoInicial || 'foto');
   const [media, setMedia] = useState(null);
   const [texto, setTexto] = useState('');
   const [descripcion, setDescripcion] = useState('');

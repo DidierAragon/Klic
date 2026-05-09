@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -15,15 +15,12 @@ import MatchesScreen from './src/screens/Chat/MatchesScreen';
 import ChatScreen from './src/screens/Chat/ChatScreen';
 import ComentariosScreen from './src/screens/Comments/ComentariosScreen';
 import SocialScreen from './src/screens/Social/SocialScreen';
-import { supabase } from './src/services/supabase';
-
 import ChatAmigoScreen from './src/screens/Chat/ChatAmigoScreen';
-
+import { supabase } from './src/services/supabase';
 
 const Stack = createNativeStackNavigator();
 
-// Pantallas donde NO mostrar el FAB
-const SIN_FAB = ['UploadPhoto', 'Chat', 'Comentarios', 'Login', 'Register'];
+const SIN_FAB = ['UploadPhoto', 'Chat', 'ChatAmigo', 'Comentarios', 'Login', 'Register'];
 
 function AppInner({ session }) {
   const navigationRef = useNavigationContainerRef();
@@ -50,8 +47,8 @@ function AppInner({ session }) {
             <Stack.Screen name="Settings" component={SettingsScreen} />
             <Stack.Screen name="UploadPhoto" component={UploadPhotoScreen} />
             <Stack.Screen name="Chat" component={ChatScreen} />
-            <Stack.Screen name="Comentarios" component={ComentariosScreen} />
             <Stack.Screen name="ChatAmigo" component={ChatAmigoScreen} />
+            <Stack.Screen name="Comentarios" component={ComentariosScreen} />
           </Stack.Navigator>
         ) : (
           <Stack.Navigator initialRouteName="Login" screenOptions={{ headerShown: false }}>
@@ -61,7 +58,6 @@ function AppInner({ session }) {
         )}
       </NavigationContainer>
 
-      {/* FAB global */}
       {mostrarFAB && (
         <FAB navigation={navigationRef} />
       )}

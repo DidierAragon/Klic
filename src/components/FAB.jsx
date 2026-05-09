@@ -1,16 +1,16 @@
 import React, { useState, useRef } from 'react';
 import {
   View, TouchableOpacity, StyleSheet, Animated,
-  Modal, Pressable, Text, Platform
+  Pressable, Text, Platform
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTema } from '../context/TemaContext';
 import { radii } from '../theme/ui';
 
 const OPCIONES = [
-  { key: 'foto',    label: 'Foto',    icon: 'image-outline',     color: '#8b5cf6' },
-  { key: 'opinion', label: 'Opinión', icon: 'chatbubble-outline', color: '#22d3ee' },
-  { key: 'video',   label: 'Video',   icon: 'videocam-outline',  color: '#fb7185' },
+  { key: 'video',   label: 'Video',    icon: 'videocam-outline',   color: '#fb7185' },
+  { key: 'opinion', label: 'Opinión',  icon: 'chatbubble-outline', color: '#22d3ee' },
+  { key: 'foto',    label: 'Foto',     icon: 'image-outline',      color: '#8b5cf6' },
 ];
 
 export default function FAB({ navigation }) {
@@ -18,24 +18,35 @@ export default function FAB({ navigation }) {
   const [abierto, setAbierto] = useState(false);
   const rotation = useRef(new Animated.Value(0)).current;
   const opacityBg = useRef(new Animated.Value(0)).current;
+
   const opcAnimations = OPCIONES.map(() => ({
     scale: useRef(new Animated.Value(0)).current,
-    translateY: useRef(new Animated.Value(20)).current,
+    translateY: useRef(new Animated.Value(30)).current,
     opacity: useRef(new Animated.Value(0)).current,
   }));
 
   const abrir = () => {
     setAbierto(true);
     Animated.parallel([
-      Animated.spring(rotation, { toValue: 1, useNativeDriver: true, tension: 100, friction: 8 }),
-      Animated.timing(opacityBg, { toValue: 1, duration: 200, useNativeDriver: true }),
+      Animated.spring(rotation, {
+        toValue: 1, useNativeDriver: true, tension: 100, friction: 8
+      }),
+      Animated.timing(opacityBg, {
+        toValue: 1, duration: 200, useNativeDriver: true
+      }),
       ...opcAnimations.map((anim, i) =>
         Animated.sequence([
-          Animated.delay(i * 60),
+          Animated.delay(i * 70),
           Animated.parallel([
-            Animated.spring(anim.scale, { toValue: 1, useNativeDriver: true, tension: 120, friction: 7 }),
-            Animated.spring(anim.translateY, { toValue: 0, useNativeDriver: true, tension: 120, friction: 7 }),
-            Animated.timing(anim.opacity, { toValue: 1, duration: 150, useNativeDriver: true }),
+            Animated.spring(anim.scale, {
+              toValue: 1, useNativeDriver: true, tension: 120, friction: 7
+            }),
+            Animated.spring(anim.translateY, {
+              toValue: 0, useNativeDriver: true, tension: 120, friction: 7
+            }),
+            Animated.timing(anim.opacity, {
+              toValue: 1, duration: 150, useNativeDriver: true
+            }),
           ]),
         ])
       ),
@@ -44,12 +55,20 @@ export default function FAB({ navigation }) {
 
   const cerrar = () => {
     Animated.parallel([
-      Animated.spring(rotation, { toValue: 0, useNativeDriver: true, tension: 100, friction: 8 }),
-      Animated.timing(opacityBg, { toValue: 0, duration: 180, useNativeDriver: true }),
+      Animated.spring(rotation, {
+        toValue: 0, useNativeDriver: true, tension: 100, friction: 8
+      }),
+      Animated.timing(opacityBg, {
+        toValue: 0, duration: 180, useNativeDriver: true
+      }),
       ...opcAnimations.map(anim =>
         Animated.parallel([
-          Animated.timing(anim.scale, { toValue: 0, duration: 150, useNativeDriver: true }),
-          Animated.timing(anim.opacity, { toValue: 0, duration: 150, useNativeDriver: true }),
+          Animated.timing(anim.scale, {
+            toValue: 0, duration: 150, useNativeDriver: true
+          }),
+          Animated.timing(anim.opacity, {
+            toValue: 0, duration: 150, useNativeDriver: true
+          }),
         ])
       ),
     ]).start(() => setAbierto(false));
@@ -59,7 +78,7 @@ export default function FAB({ navigation }) {
     cerrar();
     setTimeout(() => {
       navigation.navigate('UploadPhoto', { tipoInicial: key });
-    }, 200);
+    }, 220);
   };
 
   const rotateInterpolate = rotation.interpolate({
@@ -67,9 +86,12 @@ export default function FAB({ navigation }) {
     outputRange: ['0deg', '45deg'],
   });
 
+  const BOTTOM_FAB = Platform.OS === 'ios' ? 108 : 88;
+  const SPACING = 68; // espacio entre cada opción
+
   return (
     <>
-      {/* Overlay oscuro */}
+      {/* Overlay */}
       {abierto && (
         <Animated.View
           style={[styles.overlay, { opacity: opacityBg }]}
@@ -79,41 +101,50 @@ export default function FAB({ navigation }) {
         </Animated.View>
       )}
 
-      {/* Opciones */}
-      {abierto && (
-        <View style={styles.opciones}>
-          {OPCIONES.map((opc, i) => {
-            const anim = opcAnimations[i];
-            return (
-              <Animated.View
-                key={opc.key}
-                style={[
-                  styles.opcionRow,
-                  {
-                    opacity: anim.opacity,
-                    transform: [{ scale: anim.scale }, { translateY: anim.translateY }],
-                  }
-                ]}
-              >
-                <View style={[styles.opcionLabel, { backgroundColor: palette.panel, borderColor: palette.border }]}>
-                  <Text style={[styles.opcionLabelText, { color: palette.text }]}>{opc.label}</Text>
-                </View>
-                <TouchableOpacity
-                  style={[styles.opcionBtn, { backgroundColor: opc.color }]}
-                  onPress={() => seleccionar(opc.key)}
-                  activeOpacity={0.85}
-                >
-                  <Ionicons name={opc.icon} size={22} color="#fff" />
-                </TouchableOpacity>
-              </Animated.View>
-            );
-          })}
-        </View>
-      )}
+      {/* Opciones — cada una posicionada individualmente */}
+      {OPCIONES.map((opc, i) => {
+        const anim = opcAnimations[i];
+        const bottomPos = BOTTOM_FAB + 70 + i * SPACING;
 
-      {/* Botón principal */}
+        return (
+          <Animated.View
+            key={opc.key}
+            style={[
+              styles.opcionWrapper,
+              {
+                bottom: bottomPos,
+                opacity: anim.opacity,
+                transform: [{ scale: anim.scale }, { translateY: anim.translateY }],
+              }
+            ]}
+            pointerEvents={abierto ? 'auto' : 'none'}
+          >
+            <View style={[styles.opcionLabel, {
+              backgroundColor: palette.panel,
+              borderColor: palette.border,
+            }]}>
+              <Text style={[styles.opcionLabelText, { color: palette.text }]}>
+                {opc.label}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.opcionBtn, { backgroundColor: opc.color }]}
+              onPress={() => seleccionar(opc.key)}
+              activeOpacity={0.85}
+            >
+              <Ionicons name={opc.icon} size={22} color="#fff" />
+            </TouchableOpacity>
+          </Animated.View>
+        );
+      })}
+
+      {/* Botón principal FAB */}
       <TouchableOpacity
-        style={[styles.fab, { backgroundColor: palette.primary, shadowColor: palette.primary }]}
+        style={[styles.fab, {
+          bottom: BOTTOM_FAB,
+          backgroundColor: abierto ? '#fb7185' : palette.primary,
+          shadowColor: abierto ? '#fb7185' : palette.primary,
+        }]}
         onPress={abierto ? cerrar : abrir}
         activeOpacity={0.9}
       >
@@ -128,40 +159,34 @@ export default function FAB({ navigation }) {
 const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.55)',
     zIndex: 90,
   },
-  opciones: {
+  opcionWrapper: {
     position: 'absolute',
-    bottom: Platform.OS === 'ios' ? 110 : 90,
     right: 20,
-    zIndex: 100,
-    gap: 12,
-    alignItems: 'flex-end',
-  },
-  opcionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    zIndex: 101,
   },
   opcionLabel: {
-    paddingHorizontal: 12, paddingVertical: 6,
+    paddingHorizontal: 14, paddingVertical: 7,
     borderRadius: radii.md, borderWidth: 1,
-    shadowColor: '#000', shadowOpacity: 0.2,
-    shadowRadius: 4, elevation: 3,
+    shadowColor: '#000', shadowOpacity: 0.25,
+    shadowRadius: 4, elevation: 4,
   },
   opcionLabelText: { fontSize: 14, fontWeight: '600' },
   opcionBtn: {
-    width: 46, height: 46, borderRadius: 23,
+    width: 48, height: 48, borderRadius: 24,
     alignItems: 'center', justifyContent: 'center',
     shadowColor: '#000', shadowOpacity: 0.3,
     shadowRadius: 6, elevation: 5,
   },
   fab: {
     position: 'absolute',
-    bottom: Platform.OS === 'ios' ? 105 : 85,
     right: 20,
-    width: 56, height: 56, borderRadius: 28,
+    width: 58, height: 58, borderRadius: 29,
     alignItems: 'center', justifyContent: 'center',
     zIndex: 100,
     shadowOpacity: 0.4, shadowRadius: 12,

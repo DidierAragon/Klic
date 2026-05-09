@@ -35,7 +35,8 @@
           "merchantIdentifier": "merchant.com.klic.app",
           "enableGooglePay": true
         }
-      ]
+      ],
+      "expo-video"
     ]
   }
 }

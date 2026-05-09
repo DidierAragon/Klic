@@ -12,6 +12,8 @@ import MainMenu from '../../components/MainMenu';
 import LikeButton from '../../components/LikeButton';
 import { radii } from '../../theme/ui';
 import { useTema } from '../../context/TemaContext';
+import FAB from '../../components/FAB';
+import VideoPlayer from '../../components/VideoPlayer';
 
 export default function HomeScreen({ navigation }) {
   const { palette } = useTema();
@@ -274,28 +276,18 @@ export default function HomeScreen({ navigation }) {
     const esDueno = currentUser?.id === item.user_id;
     const yaComprado = compras.includes(item.id);
     const bloqueado = esPagado && !esDueno && !yaComprado;
-
+  
     return (
       <View style={styles.videoCard}>
         {renderPostHeader(item)}
+  
+        {/* Reproductor */}
         <View style={{ position: 'relative', overflow: 'hidden' }}>
-          <View style={styles.videoThumb}>
-            {item.thumbnail_url
-              ? <Image
-                  source={{ uri: item.thumbnail_url }}
-                  style={styles.videoThumbImg}
-                  resizeMode="cover"
-                />
-              : <View style={[styles.videoThumbPlaceholder, { backgroundColor: palette.panelSoft }]}>
-                  <Ionicons name="videocam-outline" size={48} color={palette.textMuted} />
-                </View>
-            }
-            {!bloqueado && (
-              <View style={styles.playBtn}>
-                <Ionicons name="play-circle" size={56} color="rgba(255,255,255,0.9)" />
-              </View>
-            )}
-          </View>
+          <VideoPlayer
+            url={item.url}
+            height={280}
+            bloqueado={bloqueado}
+          />
           {bloqueado && (
             <BlurView
               intensity={120}
@@ -320,6 +312,7 @@ export default function HomeScreen({ navigation }) {
             </BlurView>
           )}
         </View>
+  
         {item.descripcion
           ? <Text style={styles.videoDesc}>{item.descripcion}</Text>
           : null
@@ -376,6 +369,7 @@ export default function HomeScreen({ navigation }) {
       )}
 
       <MainMenu navigation={navigation} active="Home" />
+      <FAB />
     </View>
   );
 }

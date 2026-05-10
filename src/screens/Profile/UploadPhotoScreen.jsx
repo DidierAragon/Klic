@@ -77,6 +77,9 @@ export default function UploadPhotoScreen({ navigation, route }) {
           precio: precioFinal,
         });
         if (error) throw error;
+        if (precioFinal > 0) {
+          await supabase.from('users').update({ es_creador: true }).eq('id', user.id);
+        }
 
       } else {
         const bucket = tipo === 'foto' ? 'fotos' : 'videos';
@@ -107,6 +110,9 @@ export default function UploadPhotoScreen({ navigation, route }) {
             precio: precioFinal,
           });
           if (error) throw error;
+          if (precioFinal > 0) {
+            await supabase.from('users').update({ es_creador: true }).eq('id', user.id);
+          }
         } else {
           const { error } = await supabase.from('videos').insert({
             user_id: user.id,
@@ -115,6 +121,9 @@ export default function UploadPhotoScreen({ navigation, route }) {
             precio: precioFinal,
           });
           if (error) throw error;
+          if (precioFinal > 0) {
+            await supabase.from('users').update({ es_creador: true }).eq('id', user.id);
+          }
         }
       }
 

@@ -41,11 +41,15 @@ Deno.serve(async (req) => {
       return edad
     }
 
-    const { data: perfil } = await supabaseAdmin
+    const { data: perfil, error: perfilError } = await supabaseAdmin
       .from('users')
       .select('fecha_nacimiento')
       .eq('id', user.id)
       .maybeSingle()
+
+    if (perfilError) {
+      console.error('Lectura perfil users:', perfilError)
+    }
 
     const fechaNac =
       perfil?.fecha_nacimiento ??
@@ -56,7 +60,7 @@ Deno.serve(async (req) => {
       throw new Error('Debes ser mayor de 18 años para realizar compras.')
     }
 
-    // Asegurar fila en users sin sobrescribir verificación de tarjeta ni flags de perfil.
+    // Sincronizar users sin tocar es_creador ni tarjeta_verificada (el upsert no debe pisarlos).
     console.log("Sincronizando usuario:", user.id)
     const { error: userSyncError } = await supabaseAdmin
       .from('users')
@@ -66,7 +70,6 @@ Deno.serve(async (req) => {
         nombre: user.user_metadata?.nombre || user.email?.split('@')[0] || 'Usuario',
         fecha_nacimiento: fechaNac,
         verificado_edad: true,
-        es_creador: false,
         acepto_terminos: true,
         fecha_aceptacion: new Date().toISOString(),
         created_at: user.created_at || new Date().toISOString()
@@ -164,7 +167,10 @@ Deno.serve(async (req) => {
 
     console.log("¡Todo listo! Enviando clientSecret.")
     return new Response(
-      JSON.stringify({ clientSecret: paymentIntent.client_secret }),
+      JSON.stringify({
+        clientSecret: paymentIntent.client_secret,
+        paymentIntentId: paymentIntent.id,
+      }),
       { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
     )
   } catch (error) {

@@ -80,6 +80,8 @@ export default function HomeScreen({ navigation }) {
         throw new Error(functionError?.message || 'No se pudo iniciar el pago');
       }
 
+      const paymentIntentId = data.paymentIntentId;
+
       const { error: initError } = await initPaymentSheet({
         paymentIntentClientSecret: data.clientSecret,
         merchantDisplayName: 'Klic App',
@@ -91,6 +93,15 @@ export default function HomeScreen({ navigation }) {
       if (paymentError) {
         if (paymentError.code === 'Canceled') return;
         throw paymentError;
+      }
+
+      if (paymentIntentId) {
+        const { error: syncErr } = await supabase.functions.invoke('sync-compra-stripe', {
+          body: { paymentIntentId },
+        });
+        if (syncErr) {
+          console.warn('sync-compra-stripe:', syncErr.message);
+        }
       }
 
       setCompras(prev => [...prev, item.id]);

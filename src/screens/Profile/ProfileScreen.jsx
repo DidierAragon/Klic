@@ -10,6 +10,7 @@ import MainMenu from '../../components/MainMenu';
 import { radii } from '../../theme/ui';
 import { useTema } from '../../context/TemaContext';
 import { useStats } from '../../hooks/useStats';
+import { usuarioPuedePanelCreador } from '../../utils/creatorAccess';
 
 export default function ProfileScreen({ navigation }) {
   const { palette } = useTema();
@@ -20,6 +21,7 @@ export default function ProfileScreen({ navigation }) {
   const [fotos, setFotos] = useState([]);
   const [userId, setUserId] = useState(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [puedePanelCreador, setPuedePanelCreador] = useState(false);
 
   const { stats } = useStats(userId);
 
@@ -47,6 +49,7 @@ export default function ProfileScreen({ navigation }) {
       ]);
       setProfile(profileData || null);
       setFotos(fotosData || []);
+      setPuedePanelCreador(await usuarioPuedePanelCreador(user.id));
     } catch (e) {
       console.warn(e);
     } finally {
@@ -217,6 +220,24 @@ export default function ProfileScreen({ navigation }) {
             <Text style={[styles.accionBtnText, { color: palette.textMuted }]}>Ajustes</Text>
           </TouchableOpacity>
         </View>
+
+        {puedePanelCreador ? (
+          <TouchableOpacity
+            style={[styles.creatorDashBtn, {
+              borderColor: palette.secondary + '55',
+              backgroundColor: palette.secondary + '12',
+            }]}
+            onPress={() => navigation.navigate('CreatorDashboard')}
+            activeOpacity={0.75}
+          >
+            <Ionicons name="stats-chart" size={22} color={palette.secondary} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.creatorDashTitle, { color: palette.secondary }]}>Panel creador</Text>
+              <Text style={styles.creatorDashSub}>Ganancias, ventas por contenido y compradores</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={palette.secondary} />
+          </TouchableOpacity>
+        ) : null}
 
         {/* Grid fotos */}
         {fotos.length === 0 ? (
@@ -402,4 +423,16 @@ const makeStyles = (palette) => StyleSheet.create({
   },
   verificarTitle: { fontSize: 14, fontWeight: '700' },
   verificarSub: { fontSize: 12, color: palette.textMuted, marginTop: 2 },
+
+  creatorDashBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    borderWidth: 1.5,
+    borderRadius: radii.lg,
+    marginBottom: 20,
+  },
+  creatorDashTitle: { fontSize: 15, fontWeight: '800' },
+  creatorDashSub: { fontSize: 12, color: palette.textMuted, marginTop: 3 },
 });

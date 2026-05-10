@@ -16,11 +16,12 @@ import ChatScreen from './src/screens/Chat/ChatScreen';
 import ComentariosScreen from './src/screens/Comments/ComentariosScreen';
 import SocialScreen from './src/screens/Social/SocialScreen';
 import ChatAmigoScreen from './src/screens/Chat/ChatAmigoScreen';
+import CreatorDashboardScreen from './src/screens/Creator/CreatorDashboardScreen';
 import { supabase } from './src/services/supabase';
 
 const Stack = createNativeStackNavigator();
 
-const SIN_FAB = ['UploadPhoto', 'Chat', 'ChatAmigo', 'Comentarios', 'Login', 'Register'];
+const SIN_FAB = ['UploadPhoto', 'Chat', 'ChatAmigo', 'Comentarios', 'CreatorDashboard', 'Login', 'Register'];
 
 function AppInner({ session }) {
   const navigationRef = useNavigationContainerRef();
@@ -49,6 +50,7 @@ function AppInner({ session }) {
             <Stack.Screen name="Chat" component={ChatScreen} />
             <Stack.Screen name="ChatAmigo" component={ChatAmigoScreen} />
             <Stack.Screen name="Comentarios" component={ComentariosScreen} />
+            <Stack.Screen name="CreatorDashboard" component={CreatorDashboardScreen} />
           </Stack.Navigator>
         ) : (
           <Stack.Navigator initialRouteName="Login" screenOptions={{ headerShown: false }}>

@@ -1,13 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   Alert, ScrollView, Switch, ActivityIndicator
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import MainMenu from '../../components/MainMenu';
 import { supabase } from '../../services/supabase';
 import { radii } from '../../theme/ui';
 import { useTema } from '../../context/TemaContext';
+import { usuarioPuedePanelCreador } from '../../utils/creatorAccess';
 
 export default function SettingsScreen({ navigation }) {
   const { temaActual, setTemaActual, temas, palette } = useTema();
@@ -16,23 +18,32 @@ export default function SettingsScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [notificaciones, setNotificaciones] = useState(true);
   const [signingOut, setSigningOut] = useState(false);
+  const [puedePanelCreador, setPuedePanelCreador] = useState(false);
 
-  useEffect(() => {
-    const cargar = async () => {
-      const { data: userData } = await supabase.auth.getUser();
-      const user = userData?.user;
-      if (!user) return;
-      setEmail(user.email || '');
-      const { data } = await supabase
-        .from('users')
-        .select('nombre, fecha_nacimiento, verificado_edad, acepto_terminos')
-        .eq('id', user.id)
-        .maybeSingle();
-      setProfile(data);
+  const cargar = useCallback(async () => {
+    const { data: userData } = await supabase.auth.getUser();
+    const user = userData?.user;
+    if (!user) {
       setLoading(false);
-    };
-    cargar();
+      return;
+    }
+    setEmail(user.email || '');
+    const { data } = await supabase
+      .from('users')
+      .select('nombre, fecha_nacimiento, verificado_edad, acepto_terminos')
+      .eq('id', user.id)
+      .maybeSingle();
+    setProfile(data);
+    setPuedePanelCreador(await usuarioPuedePanelCreador(user.id));
+    setLoading(false);
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      cargar();
+    }, [cargar])
+  );
 
   const cerrarSesion = async () => {
     Alert.alert('Cerrar sesión', '¿Seguro que quieres salir?', [
@@ -174,6 +185,20 @@ export default function SettingsScreen({ navigation }) {
         {/* PERFIL */}
         <Text style={styles.sectionLabel}>PERFIL</Text>
         <View style={styles.card}>
+          {puedePanelCreador ? (
+            <>
+              <TouchableOpacity
+                style={styles.cardBtn}
+                onPress={() => navigation.navigate('CreatorDashboard')}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="wallet-outline" size={18} color={palette.secondary} />
+                <Text style={[styles.cardBtnText, { color: palette.secondary }]}>Mis ventas y ganancias</Text>
+                <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
+              </TouchableOpacity>
+              <View style={styles.separator} />
+            </>
+          ) : null}
           <TouchableOpacity
             style={styles.cardBtn}
             onPress={() => navigation.navigate('UploadPhoto')}

@@ -30,7 +30,37 @@ Deno.serve(async (req) => {
       throw new Error('No autorizado')
     }
 
-    // --- NUEVO: Asegurar que el usuario existe en la tabla pública 'users' ---
+    function edadDesdeFecha(fecha: string | null | undefined): number | null {
+      if (!fecha || !/^\d{4}-\d{2}-\d{2}/.test(fecha)) return null
+      const nac = new Date(fecha)
+      if (Number.isNaN(nac.getTime())) return null
+      const hoy = new Date()
+      let edad = hoy.getFullYear() - nac.getFullYear()
+      const m = hoy.getMonth() - nac.getMonth()
+      if (m < 0 || (m === 0 && hoy.getDate() < nac.getDate())) edad--
+      return edad
+    }
+
+    const { data: perfil, error: perfilError } = await supabaseAdmin
+      .from('users')
+      .select('fecha_nacimiento')
+      .eq('id', user.id)
+      .maybeSingle()
+
+    if (perfilError) {
+      console.error('Lectura perfil users:', perfilError)
+    }
+
+    const fechaNac =
+      perfil?.fecha_nacimiento ??
+      (user.user_metadata?.fecha_nacimiento as string | undefined) ??
+      null
+    const edad = edadDesdeFecha(fechaNac)
+    if (edad === null || edad < 18) {
+      throw new Error('Debes ser mayor de 18 años para realizar compras.')
+    }
+
+    // Sincronizar users sin tocar es_creador ni tarjeta_verificada (el upsert no debe pisarlos).
     console.log("Sincronizando usuario:", user.id)
     const { error: userSyncError } = await supabaseAdmin
       .from('users')
@@ -38,9 +68,8 @@ Deno.serve(async (req) => {
         id: user.id,
         email: user.email,
         nombre: user.user_metadata?.nombre || user.email?.split('@')[0] || 'Usuario',
-        fecha_nacimiento: user.user_metadata?.fecha_nacimiento || '2000-01-01',
+        fecha_nacimiento: fechaNac,
         verificado_edad: true,
-        es_creador: false,
         acepto_terminos: true,
         fecha_aceptacion: new Date().toISOString(),
         created_at: user.created_at || new Date().toISOString()
@@ -138,7 +167,10 @@ Deno.serve(async (req) => {
 
     console.log("¡Todo listo! Enviando clientSecret.")
     return new Response(
-      JSON.stringify({ clientSecret: paymentIntent.client_secret }),
+      JSON.stringify({
+        clientSecret: paymentIntent.client_secret,
+        paymentIntentId: paymentIntent.id,
+      }),
       { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
     )
   } catch (error) {

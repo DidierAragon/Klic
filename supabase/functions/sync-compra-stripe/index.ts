@@ -34,12 +34,49 @@ Deno.serve(async (req) => {
 
     const body = await req.json()
     const paymentIntentId = body?.paymentIntentId as string | undefined
-    if (!paymentIntentId || typeof paymentIntentId !== 'string') {
-      throw new Error('paymentIntentId requerido')
-    }
+    if (!paymentIntentId) throw new Error('paymentIntentId requerido')
 
     const pi = await stripe.paymentIntents.retrieve(paymentIntentId)
 
+    // --- MANEJO DE MONEDAS (Bypass tabla compras) ---
+    if (pi.metadata.purchaseType === 'coins') {
+      if (pi.status !== 'succeeded') {
+         return new Response(JSON.stringify({ ok: false, status: pi.status }), { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
+      }
+      
+      if (pi.metadata.userId !== user.id) throw new Error('No autorizado para este pago')
+
+      const coinsToAdd = parseInt(pi.metadata.coins || '0')
+      console.log(`Acreditando ${coinsToAdd} monedas a user ${user.id}`)
+      
+      // 1. Asegurar que existe la billetera (UPSERT)
+      await supabaseAdmin.from('wallets').upsert({ user_id: user.id }, { onConflict: 'user_id' })
+
+      // 2. Sumar balance mediante RPC
+      const { error: walletErr } = await supabaseAdmin.rpc('increment_wallet_balance', {
+        p_user_id: user.id,
+        p_amount: coinsToAdd
+      })
+
+      if (walletErr) {
+        console.error("RPC Falló, intentando actualización manual:", walletErr)
+        const { data: wallet } = await supabaseAdmin.from('wallets').select('balance').eq('user_id', user.id).single()
+        await supabaseAdmin.from('wallets').update({ balance: (wallet?.balance || 0) + coinsToAdd }).eq('user_id', user.id)
+      }
+
+      // 3. Registrar transacción
+      await supabaseAdmin.from('coin_transactions').insert({
+        user_id: user.id,
+        type: 'purchase',
+        amount: coinsToAdd,
+        description: `Compra de monedas via Stripe`,
+        metadata: { stripe_id: paymentIntentId }
+      })
+
+      return new Response(JSON.stringify({ ok: true, status: 'succeeded' }), { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
+    }
+
+    // --- Lógica original para CONTENIDO ---
     const { data: compraRow } = await supabaseAdmin
       .from('compras')
       .select('comprador_id')
@@ -51,27 +88,20 @@ Deno.serve(async (req) => {
     }
 
     if (pi.status !== 'succeeded') {
-      return new Response(
-        JSON.stringify({ ok: false, status: pi.status }),
-        { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
-      )
+      return new Response(JSON.stringify({ ok: false, status: pi.status }), { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
     }
 
-    const { error: upErr } = await supabaseAdmin
+    await supabaseAdmin
       .from('compras')
       .update({ estado: 'completado' })
       .eq('stripe_id', paymentIntentId)
       .eq('comprador_id', user.id)
 
-    if (upErr) throw upErr
+    return new Response(JSON.stringify({ ok: true, status: 'succeeded' }), { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } })
 
-    return new Response(
-      JSON.stringify({ ok: true, status: 'succeeded' }),
-      { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } }
-    )
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    return new Response(JSON.stringify({ error: message }), {
+    console.error("Error en sync:", error.message)
+    return new Response(JSON.stringify({ error: error.message }), {
       status: 400,
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
     })

@@ -3,6 +3,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { TemaProvider } from './src/context/TemaContext';
+import { WalletProvider } from './src/context/WalletContext';
 import FAB from './src/components/FAB';
 import LoginScreen from './src/screens/Auth/LoginScreen';
 import RegisterScreen from './src/screens/Auth/RegisterScreen';
@@ -17,6 +18,7 @@ import ComentariosScreen from './src/screens/Comments/ComentariosScreen';
 import SocialScreen from './src/screens/Social/SocialScreen';
 import ChatAmigoScreen from './src/screens/Chat/ChatAmigoScreen';
 import CreatorDashboardScreen from './src/screens/Creator/CreatorDashboardScreen';
+import WalletScreen from './src/screens/Profile/WalletScreen';
 import { supabase } from './src/services/supabase';
 
 const Stack = createNativeStackNavigator();
@@ -51,6 +53,7 @@ function AppInner({ session }) {
             <Stack.Screen name="ChatAmigo" component={ChatAmigoScreen} />
             <Stack.Screen name="Comentarios" component={ComentariosScreen} />
             <Stack.Screen name="CreatorDashboard" component={CreatorDashboardScreen} />
+            <Stack.Screen name="Wallet" component={WalletScreen} />
           </Stack.Navigator>
         ) : (
           <Stack.Navigator initialRouteName="Login" screenOptions={{ headerShown: false }}>
@@ -95,8 +98,10 @@ export default function App() {
   }
 
   return (
-    <TemaProvider>
-      <AppInner session={session} />
+    <TemaProvider session={session}>
+      <WalletProvider session={session}>
+        <AppInner session={session} />
+      </WalletProvider>
     </TemaProvider>
   );
 }

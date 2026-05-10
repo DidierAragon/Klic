@@ -9,8 +9,10 @@ import { supabase } from '../../services/supabase';
 import MainMenu from '../../components/MainMenu';
 import { radii } from '../../theme/ui';
 import { useTema } from '../../context/TemaContext';
+import { useWallet } from '../../context/WalletContext';
 import { useStats } from '../../hooks/useStats';
 import { usuarioPuedePanelCreador } from '../../utils/creatorAccess';
+import KlicCoin from '../../components/KlicCoin';
 
 export default function ProfileScreen({ navigation }) {
   const { palette } = useTema();
@@ -24,6 +26,7 @@ export default function ProfileScreen({ navigation }) {
   const [puedePanelCreador, setPuedePanelCreador] = useState(false);
 
   const { stats } = useStats(userId);
+  const { balance } = useWallet();
 
   const calcularEdad = (fecha) => {
     if (!fecha) return null;
@@ -182,6 +185,26 @@ export default function ProfileScreen({ navigation }) {
             </Text>
           </View>
 
+          {/* Wallet Summary */}
+          <TouchableOpacity 
+            style={[styles.walletCard, { backgroundColor: palette.panel, borderColor: palette.primary + '33' }]}
+            onPress={() => navigation.navigate('Wallet')}
+            activeOpacity={0.8}
+          >
+            <View style={styles.walletInfo}>
+              <View style={[styles.walletIcon, { backgroundColor: palette.primary + '22' }]}>
+                <KlicCoin size={24} />
+              </View>
+              <View style={{ marginLeft: 8 }}>
+                <Text style={[styles.walletLabel, { color: palette.textMuted }]}>Mi Saldo</Text>
+                <Text style={[styles.walletValue, { color: palette.text }]}>{balance} Monedas</Text>
+              </View>
+            </View>
+            <View style={[styles.walletAddBtn, { backgroundColor: palette.primary }]}>
+              <Ionicons name="add" size={20} color="#fff" />
+            </View>
+          </TouchableOpacity>
+
           {/* Stats reales */}
           <View style={[styles.statsRow, { borderColor: palette.border }]}>
             <View style={styles.statItem}>
@@ -259,9 +282,9 @@ export default function ProfileScreen({ navigation }) {
                 >
                   <Image source={{ uri: foto.url }} style={styles.gridImage} />
                   {foto.precio > 0 && (
-                    <View style={[styles.gridPriceBadge, { backgroundColor: palette.primary }]}>
-                      <Ionicons name="pricetag" size={10} color="#fff" />
-                      <Text style={styles.gridPriceText}>${foto.precio}</Text>
+                    <View style={[styles.gridPriceBadge, { backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 12 }]}>
+                      <KlicCoin size={12} />
+                      <Text style={[styles.gridPriceText, { marginLeft: 4 }]}>{Math.round(foto.precio * 100)}</Text>
                     </View>
                   )}
                 </TouchableOpacity>
@@ -435,4 +458,43 @@ const makeStyles = (palette) => StyleSheet.create({
   },
   creatorDashTitle: { fontSize: 15, fontWeight: '800' },
   creatorDashSub: { fontSize: 12, color: palette.textMuted, marginTop: 3 },
+  
+  walletCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: palette.panel,
+    padding: 16,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    width: '100%',
+    marginBottom: 16,
+  },
+  walletInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  walletIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  walletLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  walletValue: {
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  walletAddBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
 });

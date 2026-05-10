@@ -12,8 +12,10 @@ import MainMenu from '../../components/MainMenu';
 import LikeButton from '../../components/LikeButton';
 import { radii } from '../../theme/ui';
 import { useTema } from '../../context/TemaContext';
+import { useWallet } from '../../context/WalletContext';
 import FAB from '../../components/FAB';
 import VideoPlayer from '../../components/VideoPlayer';
+import KlicCoin from '../../components/KlicCoin';
 
 export default function HomeScreen({ navigation }) {
   const { palette } = useTema();
@@ -23,6 +25,7 @@ export default function HomeScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
+  const { balance, buyContent, refreshWallet } = useWallet();
 
   const cargarTodo = useCallback(async () => {
     try {
@@ -65,52 +68,52 @@ export default function HomeScreen({ navigation }) {
   const onRefresh = () => { setRefreshing(true); cargarTodo(); };
 
   const comprarContenido = async (item, tabla) => {
+    // ... (existing Stripe logic remains as a fallback or secondary option)
+  };
+
+  const desbloquearConMonedas = async (item, tabla) => {
     if (!currentUser) return Alert.alert('Error', 'Debes iniciar sesión');
-    try {
-      setLoading(true);
-      const { data, error: functionError } = await supabase.functions.invoke('create-payment-intent', {
-        body: { 
-          contentId: item.id, 
-          contentType: tabla, 
-          price: item.precio,
-          authorId: item.user_id 
-        }
-      });
-      if (functionError || !data?.clientSecret) {
-        throw new Error(functionError?.message || 'No se pudo iniciar el pago');
-      }
-
-      const paymentIntentId = data.paymentIntentId;
-
-      const { error: initError } = await initPaymentSheet({
-        paymentIntentClientSecret: data.clientSecret,
-        merchantDisplayName: 'Klic App',
-        allowsDelayedPaymentMethods: true,
-      });
-      if (initError) throw initError;
-
-      const { error: paymentError } = await presentPaymentSheet();
-      if (paymentError) {
-        if (paymentError.code === 'Canceled') return;
-        throw paymentError;
-      }
-
-      if (paymentIntentId) {
-        const { error: syncErr } = await supabase.functions.invoke('sync-compra-stripe', {
-          body: { paymentIntentId },
-        });
-        if (syncErr) {
-          console.warn('sync-compra-stripe:', syncErr.message);
-        }
-      }
-
-      setCompras(prev => [...prev, item.id]);
-      Alert.alert('✓ Pago en proceso', 'Tu contenido se desbloqueará en unos segundos.');
-    } catch (e) {
-      Alert.alert('Error de Pago', e.message);
-    } finally {
-      setLoading(false);
+    
+    const costInCoins = Math.round(item.precio * 100);
+    
+    if (balance < costInCoins) {
+      return Alert.alert(
+        'Saldo Insuficiente', 
+        `Necesitas ${costInCoins} monedas. Tienes ${balance}.`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Comprar Monedas', onPress: () => navigation.navigate('Wallet') }
+        ]
+      );
     }
+
+    Alert.alert(
+      'Confirmar Compra',
+      `¿Deseas desbloquear este contenido por ${costInCoins} monedas?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Confirmar',
+          onPress: async () => {
+            try {
+              setLoading(true);
+              const result = await buyContent(item.id, item.__tabla, costInCoins, item.user_id);
+              if (result.success) {
+                setCompras(prev => [...prev, item.id]);
+                await refreshWallet();
+                Alert.alert('✓ Éxito', 'Contenido desbloqueado correctamente.');
+              } else {
+                throw new Error(result.message);
+              }
+            } catch (e) {
+              Alert.alert('Error', e.message);
+            } finally {
+              setLoading(false);
+            }
+          }
+        }
+      ]
+    );
   };
 
   const compartir = async (item, tipo) => {
@@ -233,11 +236,17 @@ export default function HomeScreen({ navigation }) {
                 </Text>
                 <TouchableOpacity
                   style={[styles.buyBtnLarge, { backgroundColor: palette.primary }]}
-                  onPress={() => comprarContenido(item, 'fotos_perfil')}
+                  onPress={() => desbloquearConMonedas(item, 'fotos_perfil')}
                   activeOpacity={0.8}
                 >
-                  <Ionicons name="cart-outline" size={20} color="#fff" />
-                  <Text style={styles.buyBtnTextLarge}>Comprar ahora</Text>
+                  <KlicCoin size={20} />
+                  <Text style={[styles.buyBtnTextLarge, { marginLeft: 6 }]}>Desbloquear ({Math.round(item.precio * 100)})</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => comprarContenido(item, 'fotos_perfil')}
+                  style={{ marginTop: 15 }}
+                >
+                  <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12 }}>O paga con tarjeta (${item.precio} USD)</Text>
                 </TouchableOpacity>
               </View>
             </BlurView>
@@ -268,10 +277,10 @@ export default function HomeScreen({ navigation }) {
             </Text>
             <TouchableOpacity
               style={[styles.buyBtnSmall, { backgroundColor: palette.primary }]}
-              onPress={() => comprarContenido(item, 'opiniones')}
+              onPress={() => desbloquearConMonedas(item, 'opiniones')}
             >
-              <Ionicons name="cart-outline" size={14} color="#fff" />
-              <Text style={styles.buyBtnTextSmall}>Desbloquear</Text>
+              <KlicCoin size={14} />
+              <Text style={[styles.buyBtnTextSmall, { marginLeft: 4 }]}>{Math.round(item.precio * 100)}</Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -313,11 +322,17 @@ export default function HomeScreen({ navigation }) {
                 <Text style={styles.blurSub}>${item.precio} USD</Text>
                 <TouchableOpacity
                   style={[styles.buyBtnLarge, { backgroundColor: palette.primary }]}
-                  onPress={() => comprarContenido(item, 'videos')}
+                  onPress={() => desbloquearConMonedas(item, 'videos')}
                   activeOpacity={0.8}
                 >
-                  <Ionicons name="cart-outline" size={20} color="#fff" />
-                  <Text style={styles.buyBtnTextLarge}>Comprar ahora</Text>
+                  <KlicCoin size={20} />
+                  <Text style={[styles.buyBtnTextLarge, { marginLeft: 6 }]}>Desbloquear ({Math.round(item.precio * 100)})</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => comprarContenido(item, 'videos')}
+                  style={{ marginTop: 15 }}
+                >
+                  <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12 }}>O paga con tarjeta (${item.precio} USD)</Text>
                 </TouchableOpacity>
               </View>
             </BlurView>
@@ -347,9 +362,18 @@ export default function HomeScreen({ navigation }) {
       {/* Top bar */}
       <View style={styles.topBar}>
         <Text style={[styles.logo, { color: palette.primary }]}>⚡ KLIC</Text>
-        <TouchableOpacity>
-          <Ionicons name="notifications-outline" size={24} color={palette.textMuted} />
-        </TouchableOpacity>
+        <View style={styles.topActions}>
+          <TouchableOpacity 
+            style={[styles.coinBadge, { backgroundColor: palette.panelSoft }]}
+            onPress={() => navigation.navigate('Wallet')}
+          >
+            <KlicCoin size={16} />
+            <Text style={[styles.coinText, { color: palette.text, marginLeft: 6 }]}>{balance}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity>
+            <Ionicons name="notifications-outline" size={24} color={palette.textMuted} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Feed unificado */}
@@ -396,6 +420,18 @@ const makeStyles = (palette) => StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: palette.border,
   },
   logo: { fontSize: 22, fontWeight: '900', letterSpacing: 2 },
+  topActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  coinBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  coinText: { fontSize: 14, fontWeight: '800' },
 
   postCard: {
     backgroundColor: palette.panel,

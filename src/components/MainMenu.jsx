@@ -1,13 +1,10 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect } from 'react';
 import {
   StyleSheet, Text, TouchableOpacity, View, Animated, Platform
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { radii } from '../theme/ui';
 import { useTema } from '../context/TemaContext';
-import { supabase } from '../services/supabase';
-import { usuarioPuedePanelCreador } from '../utils/creatorAccess';
 
 const ITEMS_BASE = [
   { key: 'Home', label: 'Inicio', icon: 'home-outline', iconActive: 'home' },
@@ -16,19 +13,6 @@ const ITEMS_BASE = [
   { key: 'Matches', label: 'Matches', icon: 'heart-outline', iconActive: 'heart' },
   { key: 'Profile', label: 'Perfil', icon: 'person-outline', iconActive: 'person' },
 ];
-
-const CREATOR_TAB = {
-  key: 'CreatorDashboard',
-  label: 'Ventas',
-  icon: 'wallet-outline',
-  iconActive: 'wallet',
-};
-
-function itemsDelMenu(mostrarVentas) {
-  if (!mostrarVentas) return ITEMS_BASE;
-  const i = ITEMS_BASE.findIndex((x) => x.key === 'Profile');
-  return [...ITEMS_BASE.slice(0, i), CREATOR_TAB, ...ITEMS_BASE.slice(i)];
-}
 
 function NavItem({ item, isActive, onPress, palette }) {
   const scale = useRef(new Animated.Value(1)).current;
@@ -120,27 +104,10 @@ function NavItem({ item, isActive, onPress, palette }) {
 
 export default function MainMenu({ navigation, active }) {
   const { palette } = useTema();
-  const [items, setItems] = useState(ITEMS_BASE);
-
-  useFocusEffect(
-    useCallback(() => {
-      let cancelled = false;
-      (async () => {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-          if (!cancelled) setItems(ITEMS_BASE);
-          return;
-        }
-        const puede = await usuarioPuedePanelCreador(user.id);
-        if (!cancelled) setItems(itemsDelMenu(puede));
-      })();
-      return () => { cancelled = true; };
-    }, [])
-  );
 
   return (
     <View style={[styles.wrapper, { backgroundColor: palette.panel, borderTopColor: palette.border }]}>
-      {items.map((item) => (
+      {ITEMS_BASE.map((item) => (
         <NavItem
           key={item.key}
           item={item}

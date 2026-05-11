@@ -3,6 +3,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { StripeProvider } from '@stripe/stripe-react-native';
 import { TemaProvider } from './src/context/TemaContext';
 import { WalletProvider } from './src/context/WalletContext';
 import FAB from './src/components/FAB';
@@ -107,12 +108,17 @@ export default function App() {
   }
 
   return (
-    <SafeAreaProvider>
-      <TemaProvider session={session}>
-        <WalletProvider session={session}>
-          <AppInner session={session} />
-        </WalletProvider>
-      </TemaProvider>
-    </SafeAreaProvider>
+    <StripeProvider
+      publishableKey={process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY}
+      merchantIdentifier="merchant.com.klic.app"
+    >
+      <SafeAreaProvider>
+        <TemaProvider session={session}>
+          <WalletProvider session={session}>
+            <AppInner session={session} />
+          </WalletProvider>
+        </TemaProvider> 
+      </SafeAreaProvider>
+    </StripeProvider>
   );
 }

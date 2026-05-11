@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Image, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTema } from '../../context/TemaContext';
 import { useWallet } from '../../context/WalletContext';
@@ -16,12 +16,21 @@ const WalletScreen = ({ navigation }) => {
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
 
   const handleBuyPackage = async (pkg) => {
+    // Log cuando alguien abre el apartado
+    console.log(`[Stripe] Usuario inició proceso de compra: ${pkg.name} (${pkg.coins_amount} monedas)`);
+
+    // Verificación de seguridad para la clave de Stripe
+    if (!process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY) {
+      console.error('[Stripe] ERROR: EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY no definida en .env');
+      Alert.alert('Error', 'Falta la clave de Stripe en la configuración.');
+      return;
+    }
+
     setBuying(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Inicia sesión para comprar');
 
-      // Create Payment Intent via Edge Function
       const { data, error: functionError } = await supabase.functions.invoke('create-payment-intent', {
         body: { 
           purchaseType: 'coins',
@@ -35,33 +44,44 @@ const WalletScreen = ({ navigation }) => {
         throw new Error(functionError?.message || 'Error al iniciar pago');
       }
 
-      // Init Stripe Sheet
       const { error: initError } = await initPaymentSheet({
         paymentIntentClientSecret: data.clientSecret,
         merchantDisplayName: 'Klic App',
         allowsDelayedPaymentMethods: true,
+        defaultBillingDetails: { email: user.email },
+        returnURL: 'klic-app://stripe-redirect',
       });
 
       if (initError) throw initError;
 
-      // Present Stripe Sheet
       const { error: paymentError } = await presentPaymentSheet();
+      
       if (paymentError) {
-        if (paymentError.code === 'Canceled') return;
+        if (paymentError.code === 'Canceled') {
+          // Log cuando lo cierra sin comprar
+          console.log('[Stripe] El usuario cerró el formulario de pago sin completar la compra.');
+          return;
+        }
+        // Log cuando la compra es rechazada o falla
+        console.error('[Stripe] La compra fue rechazada o falló:', paymentError.message);
         throw paymentError;
       }
 
-      // Sync with DB
+      // Log cuando la compra es bien hecha
+      console.log(`[Stripe] ¡Compra exitosa! Paquete: ${pkg.name}, Monto: ${pkg.price_usd} USD`);
+
       const { error: syncErr } = await supabase.functions.invoke('sync-compra-stripe', {
         body: { paymentIntentId: data.paymentIntentId },
       });
 
-      if (syncErr) console.warn('Sync error:', syncErr.message);
+      if (syncErr) console.warn('[Stripe] Error sincronizando DB:', syncErr.message);
 
       await refreshWallet();
-      alert(`¡Éxito! Has recibido ${pkg.coins_amount} monedas.`);
+      Alert.alert('¡Éxito!', `Has recibido ${pkg.coins_amount} monedas.`);
     } catch (error) {
-      alert('Error: ' + error.message);
+      // Log cuando hay un error general / rechazo
+      console.error('[Stripe] Error en proceso de compra:', error.message);
+      Alert.alert('Error', error.message);
     } finally {
       setBuying(false);
     }

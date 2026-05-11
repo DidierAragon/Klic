@@ -26,6 +26,8 @@ import EditarPerfilScreen from './src/screens/Profile/EditarPerfilScreen';
 import PublicProfileScreen from './src/screens/Profile/PublicProfileScreen';
 import SearchUsersScreen from './src/screens/Social/SearchUsersScreen';
 import NotificationsScreen from './src/screens/Home/NotificationsScreen';
+import MyPurchasesScreen from './src/screens/Settings/MyPurchasesScreen';
+import PostDetailScreen from './src/screens/Home/PostDetailScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -64,6 +66,8 @@ function AppInner({ session }) {
             <Stack.Screen name="Wallet" component={WalletScreen} />
             <Stack.Screen name="SearchUsers" component={SearchUsersScreen} />
             <Stack.Screen name="Notifications" component={NotificationsScreen} />
+            <Stack.Screen name="MyPurchases" component={MyPurchasesScreen} />
+            <Stack.Screen name="PostDetail" component={PostDetailScreen} />
           </Stack.Navigator>
         ) : (
           <Stack.Navigator initialRouteName="Login" screenOptions={{ headerShown: false }}>

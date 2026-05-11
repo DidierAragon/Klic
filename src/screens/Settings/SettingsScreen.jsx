@@ -182,6 +182,20 @@ export default function SettingsScreen({ navigation }) {
           </View>
         </View>
 
+        {/* CONTENIDO */}
+        <Text style={styles.sectionLabel}>CONTENIDO</Text>
+        <View style={styles.card}>
+          <TouchableOpacity
+            style={styles.cardBtn}
+            onPress={() => navigation.navigate('MyPurchases')}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="bag-check-outline" size={18} color={palette.primary} />
+            <Text style={styles.cardBtnText}>Mis compras (Contenido adquirido)</Text>
+            <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
+          </TouchableOpacity>
+        </View>
+
         {/* PERFIL */}
         <Text style={styles.sectionLabel}>PERFIL</Text>
         <View style={styles.card}>

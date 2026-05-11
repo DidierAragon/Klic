@@ -36,7 +36,8 @@
           "enableGooglePay": true
         }
       ],
-      "expo-video"
+      "expo-video",
+      "expo-task-manager"
     ]
   }
 }

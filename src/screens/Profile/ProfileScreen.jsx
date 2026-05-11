@@ -13,6 +13,11 @@ import { useWallet } from '../../context/WalletContext';
 import { useStats } from '../../hooks/useStats';
 import { usuarioPuedePanelCreador } from '../../utils/creatorAccess';
 import KlicCoin from '../../components/KlicCoin';
+import {
+  pickImageToArrayBuffer,
+  guessImageContentType,
+  extensionForContentType,
+} from '../../utils/readLocalFile';
 
 export default function ProfileScreen({ navigation }) {
   const { palette } = useTema();
@@ -73,20 +78,22 @@ export default function ProfileScreen({ navigation }) {
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaType.Images,
-      allowsEditing: true, aspect: [1, 1], quality: 0.7,
+      allowsEditing: true, aspect: [1, 1], quality: 0.75,
+      base64: true,
     });
     if (result.canceled) return;
     setUploadingAvatar(true);
     try {
       const { data: userData } = await supabase.auth.getUser();
       const user = userData?.user;
-      const response = await fetch(result.assets[0].uri);
-      const blob = await response.blob();
-      const arrayBuffer = await new Response(blob).arrayBuffer();
-      const fileName = `avatars/${user.id}.jpg`;
+      const asset = result.assets[0];
+      const arrayBuffer = await pickImageToArrayBuffer(asset);
+      const contentType = guessImageContentType(asset);
+      const ext = extensionForContentType(contentType);
+      const fileName = `avatars/${user.id}.${ext}`;
       const { error: uploadError } = await supabase.storage
         .from('fotos')
-        .upload(fileName, arrayBuffer, { contentType: 'image/jpeg', upsert: true });
+        .upload(fileName, arrayBuffer, { contentType, upsert: true });
       if (uploadError) throw uploadError;
       const { data: { publicUrl } } = supabase.storage.from('fotos').getPublicUrl(fileName);
       await supabase.from('users').update({ avatar_url: publicUrl }).eq('id', user.id);
@@ -166,7 +173,12 @@ export default function ProfileScreen({ navigation }) {
             <Text style={[styles.edad, { color: palette.secondary }]}>{edad} años</Text>
           )}
           <Text style={styles.emailText}>{email}</Text>
-
+          {profile?.alias && (
+            <Text style={styles.alias}>@{profile.alias}</Text>
+          )}
+          {profile?.descripcion && (
+            <Text style={styles.descripcion}>{profile.descripcion}</Text>
+          )}
           {/* Badge verificación */}
           <View style={[styles.nivelBadge, {
             backgroundColor: profile?.documento_verificado ? '#0a2a1a' : palette.panelSoft,
@@ -224,25 +236,34 @@ export default function ProfileScreen({ navigation }) {
           </View>
         </View>
 
-        {/* Acciones */}
-        <View style={styles.accionesRow}>
-          <TouchableOpacity
-            style={[styles.accionBtn, { borderColor: palette.primary, flex: 2 }]}
-            onPress={() => navigation.navigate('UploadPhoto')}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="camera-outline" size={18} color={palette.primary} />
-            <Text style={[styles.accionBtnText, { color: palette.primary }]}>Subir foto</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.accionBtn, { borderColor: palette.border, flex: 1 }]}
-            onPress={() => navigation.navigate('Settings')}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="settings-outline" size={18} color={palette.textMuted} />
-            <Text style={[styles.accionBtnText, { color: palette.textMuted }]}>Ajustes</Text>
-          </TouchableOpacity>
-        </View>
+  
+    <View style={styles.accionesRow}>
+      <TouchableOpacity
+        style={[styles.accionBtn, { borderColor: palette.primary, flex: 2 }]}
+        onPress={() => navigation.navigate('UploadPhoto')}
+        activeOpacity={0.7}
+      >
+        <Ionicons name="camera-outline" size={18} color={palette.primary} />
+        <Text style={[styles.accionBtnText, { color: palette.primary }]}>Subir</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[styles.accionBtn, { borderColor: palette.secondary, flex: 2 }]}
+        onPress={() => navigation.navigate('EditarPerfil')}
+        activeOpacity={0.7}
+      >
+        <Ionicons name="pencil-outline" size={18} color={palette.secondary} />
+        <Text style={[styles.accionBtnText, { color: palette.secondary }]}>Editar</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[styles.accionBtn, { borderColor: palette.border, flex: 1 }]}
+        onPress={() => navigation.navigate('Settings')}
+        activeOpacity={0.7}
+      >
+        <Ionicons name="settings-outline" size={18} color={palette.textMuted} />
+      </TouchableOpacity>
+    </View>
 
         {puedePanelCreador ? (
           <TouchableOpacity
@@ -379,6 +400,15 @@ const makeStyles = (palette) => StyleSheet.create({
   nombre: { fontSize: 26, fontWeight: '800', color: palette.text, marginBottom: 2 },
   edad: { fontSize: 14, fontWeight: '600', marginBottom: 2 },
   emailText: { fontSize: 13, color: palette.textMuted, marginBottom: 10 },
+  alias: { fontSize: 13, color: palette.textMuted, marginBottom: 2 },
+  descripcion: {
+    fontSize: 13,
+    color: palette.textMuted,
+    textAlign: 'center',
+    paddingHorizontal: 32,
+    lineHeight: 18,
+    marginBottom: 8,
+  },
 
   nivelBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
@@ -498,3 +528,4 @@ const makeStyles = (palette) => StyleSheet.create({
     alignItems: 'center',
   },
 });
+

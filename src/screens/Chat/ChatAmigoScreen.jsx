@@ -17,7 +17,12 @@ export default function ChatAmigoScreen({ route, navigation }) {
   const [loading, setLoading] = useState(true);
   const [enviando, setEnviando] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
+  const currentUserIdRef = useRef(null);
   const flatListRef = useRef(null);
+
+  useEffect(() => {
+    currentUserIdRef.current = currentUser?.id ?? null;
+  }, [currentUser?.id]);
 
   const cargarMensajes = useCallback(async () => {
     try {
@@ -47,23 +52,36 @@ export default function ChatAmigoScreen({ route, navigation }) {
   useEffect(() => { cargarMensajes(); }, [cargarMensajes]);
 
   useEffect(() => {
+    const aid = String(amistadId);
     const channel = supabase
-      .channel(`chat-amigo-${amistadId}`)
-      .on('postgres_changes', {
-        event: 'INSERT', schema: 'public',
-        table: 'mensajes_amigos',
-        filter: `amistad_id=eq.${amistadId}`,
-      }, async (payload) => {
-        setMensajes(prev => [...prev, payload.new]);
-        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
-        if (payload.new.sender_id !== currentUser?.id) {
-          await supabase.from('mensajes_amigos')
-            .update({ leido: true }).eq('id', payload.new.id);
+      .channel(`chat-amigo-${aid}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'mensajes_amigos',
+          filter: `amistad_id=eq.${aid}`,
+        },
+        async (payload) => {
+          const row = payload.new;
+          setMensajes((prev) =>
+            prev.some((m) => m.id === row.id) ? prev : [...prev, row]
+          );
+          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
+          if (row.sender_id !== currentUserIdRef.current) {
+            await supabase
+              .from('mensajes_amigos')
+              .update({ leido: true })
+              .eq('id', row.id);
+          }
         }
-      })
+      )
       .subscribe();
-    return () => supabase.removeChannel(channel);
-  }, [amistadId, currentUser]);
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [amistadId]);
 
   const enviarMensaje = async () => {
     if (!texto.trim() || enviando || !currentUser) return;
@@ -71,13 +89,20 @@ export default function ChatAmigoScreen({ route, navigation }) {
     setTexto('');
     setEnviando(true);
     try {
-      const { error } = await supabase.from('mensajes_amigos').insert({
-        amistad_id: amistadId,
-        sender_id: currentUser.id,
-        contenido: textoEnviar,
-      });
+      const { data: nuevo, error } = await supabase
+        .from('mensajes_amigos')
+        .insert({
+          amistad_id: amistadId,
+          sender_id: currentUser.id,
+          contenido: textoEnviar,
+        })
+        .select('*')
+        .single();
       if (error) throw error;
-      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+      setMensajes((prev) =>
+        prev.some((m) => m.id === nuevo.id) ? prev : [...prev, nuevo]
+      );
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
     } catch (e) {
       Alert.alert('Error', e.message);
       setTexto(textoEnviar);

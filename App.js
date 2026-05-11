@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { TemaProvider } from './src/context/TemaContext';
@@ -20,10 +21,14 @@ import ChatAmigoScreen from './src/screens/Chat/ChatAmigoScreen';
 import CreatorDashboardScreen from './src/screens/Creator/CreatorDashboardScreen';
 import WalletScreen from './src/screens/Profile/WalletScreen';
 import { supabase } from './src/services/supabase';
+import EditarPerfilScreen from './src/screens/Profile/EditarPerfilScreen';
+import PublicProfileScreen from './src/screens/Profile/PublicProfileScreen';
+import SearchUsersScreen from './src/screens/Social/SearchUsersScreen';
+import NotificationsScreen from './src/screens/Home/NotificationsScreen';
 
 const Stack = createNativeStackNavigator();
 
-const SIN_FAB = ['UploadPhoto', 'Chat', 'ChatAmigo', 'Comentarios', 'CreatorDashboard', 'Login', 'Register'];
+const SIN_FAB = ['UploadPhoto', 'Chat', 'ChatAmigo', 'Comentarios', 'CreatorDashboard', 'Login', 'Register', 'SearchUsers', 'Notifications'];
 
 function AppInner({ session }) {
   const navigationRef = useNavigationContainerRef();
@@ -47,13 +52,17 @@ function AppInner({ session }) {
             <Stack.Screen name="Social" component={SocialScreen} />
             <Stack.Screen name="Matches" component={MatchesScreen} />
             <Stack.Screen name="Profile" component={ProfileScreen} />
+            <Stack.Screen name="UserProfile" component={PublicProfileScreen} />
             <Stack.Screen name="Settings" component={SettingsScreen} />
             <Stack.Screen name="UploadPhoto" component={UploadPhotoScreen} />
+            <Stack.Screen name="EditarPerfil" component={EditarPerfilScreen} />
             <Stack.Screen name="Chat" component={ChatScreen} />
             <Stack.Screen name="ChatAmigo" component={ChatAmigoScreen} />
             <Stack.Screen name="Comentarios" component={ComentariosScreen} />
             <Stack.Screen name="CreatorDashboard" component={CreatorDashboardScreen} />
             <Stack.Screen name="Wallet" component={WalletScreen} />
+            <Stack.Screen name="SearchUsers" component={SearchUsersScreen} />
+            <Stack.Screen name="Notifications" component={NotificationsScreen} />
           </Stack.Navigator>
         ) : (
           <Stack.Navigator initialRouteName="Login" screenOptions={{ headerShown: false }}>
@@ -98,10 +107,12 @@ export default function App() {
   }
 
   return (
-    <TemaProvider session={session}>
-      <WalletProvider session={session}>
-        <AppInner session={session} />
-      </WalletProvider>
-    </TemaProvider>
+    <SafeAreaProvider>
+      <TemaProvider session={session}>
+        <WalletProvider session={session}>
+          <AppInner session={session} />
+        </WalletProvider>
+      </TemaProvider>
+    </SafeAreaProvider>
   );
 }

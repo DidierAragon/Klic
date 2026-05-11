@@ -1,17 +1,22 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { LinearGradient } from 'expo-linear-gradient';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   Image, ActivityIndicator, RefreshControl, TextInput,
-  Animated, Dimensions
+  Animated, Dimensions, Alert, Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../services/supabase';
 import MainMenu from '../../components/MainMenu';
 import { radii } from '../../theme/ui';
 import { useTema } from '../../context/TemaContext';
+import { enviarSolicitudAmistad } from '../../utils/amigos';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const TABS = ['Chats', 'Amigos', 'Seguidores'];
+const TAB_INNER_WIDTH = SCREEN_WIDTH - 32;
+const TAB_SLOT = TAB_INNER_WIDTH / TABS.length;
 
 export default function SocialScreen({ navigation }) {
   const { palette } = useTema();
@@ -27,18 +32,24 @@ export default function SocialScreen({ navigation }) {
   const [busqueda, setBusqueda] = useState('');
   const [resultados, setResultados] = useState([]);
   const [buscando, setBuscando] = useState(false);
+  const [amigoUserIds, setAmigoUserIds] = useState(() => new Set());
+  const [pendingSentIds, setPendingSentIds] = useState(() => new Set());
 
   const translateX = useRef(new Animated.Value(0)).current;
   const tabIndicatorX = useRef(new Animated.Value(0)).current;
+  const chatsRef = useRef(chats);
+  chatsRef.current = chats;
 
   const animarATab = (idx) => {
     Animated.parallel([
       Animated.spring(translateX, {
         toValue: -idx * SCREEN_WIDTH,
-        useNativeDriver: true, tension: 100, friction: 12,
+        useNativeDriver: true,
+        tension: 100,
+        friction: 12,
       }),
       Animated.spring(tabIndicatorX, {
-        toValue: idx * (SCREEN_WIDTH / TABS.length),
+        toValue: idx * TAB_SLOT,
         useNativeDriver: true, tension: 100, friction: 12,
       }),
     ]).start();
@@ -59,6 +70,7 @@ export default function SocialScreen({ navigation }) {
         { data: siguiendoData },
         { data: solicitudesData },
         { data: chatsData },
+        { data: pendingOutData },
       ] = await Promise.all([
         // Amigos aceptados
         supabase.from('amigos')
@@ -95,6 +107,11 @@ export default function SocialScreen({ navigation }) {
           `)
           .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`)
           .eq('estado', 'aceptado'),
+        supabase.from('amigos')
+          .select('user1_id, user2_id')
+          .eq('estado', 'pendiente')
+          .eq('solicitante_id', user.id)
+          .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`),
       ]);
 
       // Enriquecer chats con último mensaje
@@ -119,6 +136,16 @@ export default function SocialScreen({ navigation }) {
       );
 
       setAmigos(amigosData || []);
+      const otrosAmigos = (amigosData || []).map((a) =>
+        a.user1?.id === user.id ? a.user2?.id : a.user1?.id
+      ).filter(Boolean);
+      setAmigoUserIds(new Set(otrosAmigos));
+
+      const pendOut = (pendingOutData || []).map((r) =>
+        r.user1_id === user.id ? r.user2_id : r.user1_id
+      ).filter(Boolean);
+      setPendingSentIds(new Set(pendOut));
+
       setSeguidores(seguidoresData || []);
       setSiguiendo((siguiendoData || []).map(s => s.seguido_id));
       setSolicitudes(solicitudesData || []);
@@ -131,7 +158,59 @@ export default function SocialScreen({ navigation }) {
     }
   }, []);
 
-  useEffect(() => { cargarTodo(); }, [cargarTodo]);
+  useFocusEffect(
+    useCallback(() => {
+      cargarTodo();
+    }, [cargarTodo])
+  );
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const uid = currentUser.id;
+    const channel = supabase
+      .channel(`social-inbox-msgs-${uid}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'mensajes_amigos' },
+        (payload) => {
+          const row = payload.new;
+          const list = chatsRef.current;
+          if (!list.some((c) => c.id === row.amistad_id)) return;
+
+          setChats((prev) => {
+            const updated = prev.map((c) => {
+              if (c.id !== row.amistad_id) return c;
+              const incUnread =
+                row.sender_id !== uid && row.leido === false ? 1 : 0;
+              return {
+                ...c,
+                ultimoMensaje: {
+                  contenido: row.contenido,
+                  created_at: row.created_at,
+                  sender_id: row.sender_id,
+                  leido: row.leido,
+                },
+                noLeidos: (c.noLeidos || 0) + incUnread,
+              };
+            });
+            return [...updated].sort((a, b) => {
+              const ta = new Date(
+                a.ultimoMensaje?.created_at || a.created_at || 0
+              ).getTime();
+              const tb = new Date(
+                b.ultimoMensaje?.created_at || b.created_at || 0
+              ).getTime();
+              return tb - ta;
+            });
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser?.id]);
 
   const onRefresh = () => { setRefreshing(true); cargarTodo(); };
 
@@ -153,41 +232,59 @@ export default function SocialScreen({ navigation }) {
 
   const seguir = async (userId) => {
     try {
-      await supabase.from('seguidores').insert({
+      const { error } = await supabase.from('seguidores').insert({
         seguidor_id: currentUser.id,
         seguido_id: userId,
       });
+      if (error) {
+        Alert.alert('No se pudo seguir', error.message);
+        return;
+      }
       setSiguiendo(prev => [...prev, userId]);
-    } catch (e) { console.warn(e); }
+    } catch (e) {
+      console.warn(e);
+      Alert.alert('Error', e.message || 'Intenta de nuevo');
+    }
   };
 
   const dejarDeSeguir = async (userId) => {
     try {
-      await supabase.from('seguidores').delete()
+      const { error } = await supabase.from('seguidores').delete()
         .eq('seguidor_id', currentUser.id)
         .eq('seguido_id', userId);
+      if (error) {
+        Alert.alert('Error', error.message);
+        return;
+      }
       setSiguiendo(prev => prev.filter(id => id !== userId));
     } catch (e) { console.warn(e); }
   };
 
-  const enviarSolicitudAmistad = async (userId) => {
+  const onEnviarSolicitudAmistad = async (userId) => {
     try {
-      const u1 = currentUser.id < userId ? currentUser.id : userId;
-      const u2 = currentUser.id < userId ? userId : currentUser.id;
-      await supabase.from('amigos').insert({
-        user1_id: u1, user2_id: u2,
-        solicitante_id: currentUser.id,
-        estado: 'pendiente',
-      });
-      alert('Solicitud enviada ✓');
-    } catch (e) { console.warn(e); }
+      const res = await enviarSolicitudAmistad(supabase, currentUser.id, userId);
+      if (!res.ok) {
+        Alert.alert('Amigos', res.message);
+        return;
+      }
+      Alert.alert('Listo', res.action === 'resent' ? 'Solicitud reenviada' : 'Solicitud enviada');
+      setPendingSentIds((prev) => new Set([...prev, userId]));
+      cargarTodo();
+    } catch (e) {
+      console.warn(e);
+      Alert.alert('Error', e.message || 'No se pudo enviar');
+    }
   };
 
   const aceptarSolicitud = async (amistadId) => {
     try {
-      await supabase.from('amigos')
+      const { error } = await supabase.from('amigos')
         .update({ estado: 'aceptado' })
         .eq('id', amistadId);
+      if (error) {
+        Alert.alert('Error', error.message);
+        return;
+      }
       setSolicitudes(prev => prev.filter(s => s.id !== amistadId));
       cargarTodo();
     } catch (e) { console.warn(e); }
@@ -195,11 +292,21 @@ export default function SocialScreen({ navigation }) {
 
   const rechazarSolicitud = async (amistadId) => {
     try {
-      await supabase.from('amigos')
+      const { error } = await supabase.from('amigos')
         .update({ estado: 'rechazado' })
         .eq('id', amistadId);
+      if (error) {
+        Alert.alert('Error', error.message);
+        return;
+      }
       setSolicitudes(prev => prev.filter(s => s.id !== amistadId));
     } catch (e) { console.warn(e); }
+  };
+
+  const irPerfilUsuario = (userId) => {
+    if (!userId || !currentUser) return;
+    if (userId === currentUser.id) navigation.navigate('Profile');
+    else navigation.navigate('UserProfile', { userId });
   };
 
   const getOtroUsuario = (amistad) => {
@@ -256,10 +363,16 @@ export default function SocialScreen({ navigation }) {
         </View>
         <View style={styles.chatInfo}>
           <View style={styles.chatTop}>
-            <Text style={[styles.chatNombre, { color: palette.text },
-              tieneNoLeidos && { fontWeight: '800' }]}>
-              {otro.nombre}
-            </Text>
+            <TouchableOpacity
+              onPress={() => irPerfilUsuario(otro.id)}
+              hitSlop={{ top: 6, bottom: 6 }}
+              style={{ flex: 1, marginRight: 8 }}
+            >
+              <Text style={[styles.chatNombre, { color: palette.text },
+                tieneNoLeidos && { fontWeight: '800' }]}>
+                {otro.nombre}
+              </Text>
+            </TouchableOpacity>
             <Text style={[styles.chatFecha, { color: palette.textMuted }]}>
               {formatearFecha(item.ultimoMensaje?.created_at || item.created_at)}
             </Text>
@@ -297,8 +410,16 @@ export default function SocialScreen({ navigation }) {
 
     return (
       <View style={styles.userItem}>
-        {renderAvatar(otro, 46)}
-        <Text style={[styles.userNombre, { color: palette.text }]}>{otro.nombre}</Text>
+        <TouchableOpacity
+          onPress={() => irPerfilUsuario(otro.id)}
+          activeOpacity={0.7}
+          style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 }}
+        >
+          {renderAvatar(otro, 46)}
+          <Text style={[styles.userNombre, { color: palette.text }]} numberOfLines={1}>
+            {otro.nombre}
+          </Text>
+        </TouchableOpacity>
         <TouchableOpacity
           style={[styles.msgBtn, { backgroundColor: palette.primary }]}
           onPress={() => navigation.navigate('ChatAmigo', {
@@ -319,10 +440,16 @@ export default function SocialScreen({ navigation }) {
 
     return (
       <View style={styles.userItem}>
-        {renderAvatar(usuario, 46)}
-        <Text style={[styles.userNombre, { color: palette.text }]} numberOfLines={1}>
-          {usuario?.nombre}
-        </Text>
+        <TouchableOpacity
+          onPress={() => irPerfilUsuario(usuario?.id)}
+          activeOpacity={0.7}
+          style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 }}
+        >
+          {renderAvatar(usuario, 46)}
+          <Text style={[styles.userNombre, { color: palette.text }]} numberOfLines={1}>
+            {usuario?.nombre}
+          </Text>
+        </TouchableOpacity>
         <TouchableOpacity
           style={[styles.seguirBtn, {
             backgroundColor: yaSigo ? palette.panelSoft : palette.primary,
@@ -341,13 +468,21 @@ export default function SocialScreen({ navigation }) {
   // ── BUSCADOR ──────────────────────────────────────────────────────
   const renderResultado = ({ item }) => {
     const yaSigo = siguiendo.includes(item.id);
+    const yaAmigo = amigoUserIds.has(item.id);
+    const solicitudPendiente = pendingSentIds.has(item.id);
     return (
       <View style={styles.userItem}>
-        {renderAvatar(item, 46)}
-        <Text style={[styles.userNombre, { color: palette.text }]} numberOfLines={1}>
-          {item.nombre}
-        </Text>
-        <View style={{ flexDirection: 'row', gap: 6 }}>
+        <TouchableOpacity
+          onPress={() => irPerfilUsuario(item.id)}
+          activeOpacity={0.7}
+          style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 }}
+        >
+          {renderAvatar(item, 46)}
+          <Text style={[styles.userNombre, { color: palette.text }]} numberOfLines={1}>
+            {item.nombre}
+          </Text>
+        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 6, flexShrink: 0 }}>
           <TouchableOpacity
             style={[styles.seguirBtn, {
               backgroundColor: yaSigo ? palette.panelSoft : palette.primary,
@@ -359,12 +494,22 @@ export default function SocialScreen({ navigation }) {
               {yaSigo ? 'Siguiendo' : 'Seguir'}
             </Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.seguirBtn, { backgroundColor: palette.panelSoft, borderColor: palette.border }]}
-            onPress={() => enviarSolicitudAmistad(item.id)}
-          >
-            <Ionicons name="person-add-outline" size={15} color={palette.textMuted} />
-          </TouchableOpacity>
+          {yaAmigo ? (
+            <View style={[styles.seguirBtn, { backgroundColor: palette.secondary + '22', borderColor: palette.secondary }]}>
+              <Ionicons name="people" size={15} color={palette.secondary} />
+            </View>
+          ) : solicitudPendiente ? (
+            <View style={[styles.seguirBtn, { backgroundColor: palette.panelSoft, borderColor: palette.border }]}>
+              <Ionicons name="time-outline" size={15} color={palette.textMuted} />
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={[styles.seguirBtn, { backgroundColor: palette.panelSoft, borderColor: palette.border }]}
+              onPress={() => onEnviarSolicitudAmistad(item.id)}
+            >
+              <Ionicons name="person-add-outline" size={15} color={palette.textMuted} />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     );
@@ -372,33 +517,47 @@ export default function SocialScreen({ navigation }) {
 
   return (
     <View style={styles.wrapper}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.title}>Social</Text>
-        {solicitudes.length > 0 && (
-          <View style={[styles.solicitudesBadge, { backgroundColor: palette.primary }]}>
-            <Text style={styles.solicitudesText}>{solicitudes.length}</Text>
+      <LinearGradient
+        colors={[palette.primary + '2e', palette.bg, palette.bg]}
+        locations={[0, 0.45, 1]}
+        style={styles.hero}
+      >
+        <View style={styles.heroRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.heroTitle, { color: palette.text }]}>Social</Text>
+            <Text style={[styles.heroSub, { color: palette.textMuted }]}>
+              Chats, amigos y comunidad
+            </Text>
           </View>
-        )}
-      </View>
+          {solicitudes.length > 0 ? (
+            <View style={[styles.heroBadge, { backgroundColor: palette.primary }]}>
+              <Text style={styles.heroBadgeText}>{solicitudes.length}</Text>
+            </View>
+          ) : null}
+        </View>
 
-      {/* Buscador */}
-      <View style={[styles.searchRow, { backgroundColor: palette.panelSoft, borderColor: palette.border }]}>
-        <Ionicons name="search-outline" size={18} color={palette.textMuted} />
-        <TextInput
-          style={[styles.searchInput, { color: palette.text }]}
-          placeholder="Buscar personas..."
-          placeholderTextColor={palette.textMuted}
-          value={busqueda}
-          onChangeText={buscarUsuarios}
-          autoCorrect={false}
-        />
-        {busqueda.length > 0 && (
-          <TouchableOpacity onPress={() => { setBusqueda(''); setResultados([]); }}>
-            <Ionicons name="close-circle" size={18} color={palette.textMuted} />
-          </TouchableOpacity>
-        )}
-      </View>
+        <View style={[styles.searchRow, {
+          backgroundColor: palette.panel,
+          borderColor: palette.primary + '33',
+        }]}>
+          <View style={[styles.searchIconWrap, { backgroundColor: palette.primary + '18' }]}>
+            <Ionicons name="search" size={18} color={palette.primary} />
+          </View>
+          <TextInput
+            style={[styles.searchInput, { color: palette.text }]}
+            placeholder="Buscar por nombre..."
+            placeholderTextColor={palette.textMuted}
+            value={busqueda}
+            onChangeText={buscarUsuarios}
+            autoCorrect={false}
+          />
+          {busqueda.length > 0 ? (
+            <TouchableOpacity onPress={() => { setBusqueda(''); setResultados([]); }} hitSlop={10}>
+              <Ionicons name="close-circle" size={20} color={palette.textMuted} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      </LinearGradient>
 
       {/* Resultados de búsqueda */}
       {busqueda.length >= 2 ? (
@@ -421,26 +580,37 @@ export default function SocialScreen({ navigation }) {
           />
         )
       ) : (
-        <>
-          {/* Tabs */}
-          <View style={styles.tabsRow}>
-            {TABS.map((tab, i) => (
-              <TouchableOpacity key={tab} style={styles.tab} onPress={() => animarATab(i)}>
-                <Text style={[styles.tabText, { color: tabIndex === i ? palette.primary : palette.textMuted },
-                  tabIndex === i && { fontWeight: '700' }]}>
-                  {tab}
-                  {tab === 'Amigos' && solicitudes.length > 0
-                    ? ` (${solicitudes.length})`
-                    : ''
-                  }
-                </Text>
-              </TouchableOpacity>
-            ))}
-            <Animated.View style={[styles.tabIndicator, {
-              backgroundColor: palette.primary,
-              width: SCREEN_WIDTH / TABS.length,
-              transform: [{ translateX: tabIndicatorX }],
-            }]} />
+          <>
+          <View style={[styles.tabsShell, { backgroundColor: palette.panelSoft, borderColor: palette.border }]}>
+            <View style={styles.tabsRow}>
+              {TABS.map((tab, i) => (
+                <TouchableOpacity
+                  key={tab}
+                  style={[
+                    styles.tab,
+                    tabIndex === i && { backgroundColor: palette.panel },
+                  ]}
+                  onPress={() => animarATab(i)}
+                  activeOpacity={0.85}
+                >
+                  <Text style={[
+                    styles.tabText,
+                    { color: tabIndex === i ? palette.primary : palette.textMuted },
+                    tabIndex === i && { fontWeight: '800' },
+                  ]}>
+                    {tab}
+                    {tab === 'Amigos' && solicitudes.length > 0
+                      ? ` · ${solicitudes.length}`
+                      : ''}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              <Animated.View style={[styles.tabIndicator, {
+                backgroundColor: palette.primary,
+                width: TAB_SLOT,
+                transform: [{ translateX: tabIndicatorX }],
+              }]} />
+            </View>
           </View>
 
           {/* Contenido tabs */}
@@ -459,7 +629,7 @@ export default function SocialScreen({ navigation }) {
                   renderItem={renderChat}
                   refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />}
                   showsVerticalScrollIndicator={false}
-                  ItemSeparatorComponent={() => <View style={[styles.separator, { backgroundColor: palette.border }]} />}
+                  contentContainerStyle={styles.chatsList}
                   ListEmptyComponent={
                     <View style={styles.emptyBox}>
                       <Ionicons name="chatbubbles-outline" size={48} color={palette.textMuted} />
@@ -489,10 +659,15 @@ export default function SocialScreen({ navigation }) {
                         </Text>
                         {solicitudes.map(s => (
                           <View key={s.id} style={styles.solicitudRow}>
-                            {renderAvatar(s.solicitante, 38)}
-                            <Text style={[styles.solicitudNombre, { color: palette.text }]}>
-                              {s.solicitante?.nombre}
-                            </Text>
+                            <TouchableOpacity
+                              onPress={() => irPerfilUsuario(s.solicitante?.id)}
+                              style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8 }}
+                            >
+                              {renderAvatar(s.solicitante, 38)}
+                              <Text style={[styles.solicitudNombre, { color: palette.text }]}>
+                                {s.solicitante?.nombre}
+                              </Text>
+                            </TouchableOpacity>
                             <TouchableOpacity
                               style={[styles.solicitudBtn, { backgroundColor: palette.primary }]}
                               onPress={() => aceptarSolicitud(s.id)}
@@ -556,35 +731,78 @@ const makeStyles = (palette) => StyleSheet.create({
   wrapper: { flex: 1, backgroundColor: palette.bg, justifyContent: 'space-between' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
-  header: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 20, paddingTop: 52, paddingBottom: 12,
-    borderBottomWidth: 1, borderBottomColor: palette.border,
+  hero: {
+    paddingTop: 48,
+    paddingBottom: 6,
   },
-  title: { fontSize: 28, fontWeight: '800', color: palette.text },
-  solicitudesBadge: {
-    width: 22, height: 22, borderRadius: 11,
-    alignItems: 'center', justifyContent: 'center',
+  heroRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingHorizontal: 20,
+    marginBottom: 14,
   },
-  solicitudesText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  heroTitle: { fontSize: 30, fontWeight: '900', letterSpacing: -0.6 },
+  heroSub: { fontSize: 13, marginTop: 4, fontWeight: '500' },
+  heroBadge: {
+    minWidth: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    marginLeft: 8,
+    marginTop: 4,
+  },
+  heroBadgeText: { color: '#fff', fontSize: 12, fontWeight: '800' },
 
   searchRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    marginHorizontal: 16, marginVertical: 10,
-    paddingHorizontal: 12, paddingVertical: 10,
-    borderRadius: radii.pill, borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginHorizontal: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOpacity: 0.08,
+        shadowRadius: 12,
+        shadowOffset: { width: 0, height: 4 },
+      },
+      android: { elevation: 3 },
+    }),
+  },
+  searchIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   searchInput: { flex: 1, fontSize: 15 },
 
-  tabsRow: {
-    flexDirection: 'row', position: 'relative',
-    borderBottomWidth: 1, borderBottomColor: palette.border,
+  tabsShell: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 6,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    overflow: 'hidden',
   },
-  tab: { flex: 1, paddingVertical: 11, alignItems: 'center' },
+  tabsRow: {
+    flexDirection: 'row',
+    position: 'relative',
+  },
+  tab: { flex: 1, paddingVertical: 12, alignItems: 'center' },
   tabText: { fontSize: 13, fontWeight: '600' },
   tabIndicator: {
-    position: 'absolute', bottom: 0, left: 0,
-    height: 2, borderRadius: 2,
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    height: 3,
+    borderRadius: 3,
   },
 
   slides: {
@@ -592,18 +810,35 @@ const makeStyles = (palette) => StyleSheet.create({
     width: SCREEN_WIDTH * TABS.length,
   },
   slide: { width: SCREEN_WIDTH, flex: 1 },
-  lista: { padding: 12, gap: 4 },
-  separator: { height: 1, marginLeft: 74 },
+  lista: { padding: 12, paddingTop: 8, gap: 8 },
+  chatsList: { padding: 12, paddingTop: 10, paddingBottom: 20 },
 
   // Chat item
   chatItem: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 12, gap: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 12,
+    marginBottom: 10,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.panel,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.07,
+        shadowRadius: 10,
+      },
+      android: { elevation: 2 },
+    }),
   },
   onlineDot: {
     position: 'absolute', bottom: 1, right: 1,
     width: 11, height: 11, borderRadius: 6,
-    borderWidth: 2, borderColor: palette.bg,
+    borderWidth: 2, borderColor: palette.panel,
   },
   chatInfo: { flex: 1, gap: 3 },
   chatTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
@@ -642,8 +877,22 @@ const makeStyles = (palette) => StyleSheet.create({
 
   // Solicitudes
   solicitudesCard: {
-    margin: 12, padding: 14, borderRadius: radii.lg,
-    borderWidth: 1, gap: 10, marginBottom: 4,
+    marginHorizontal: 12,
+    marginTop: 8,
+    marginBottom: 12,
+    padding: 16,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    gap: 12,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOpacity: 0.06,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 2 },
+      },
+      android: { elevation: 2 },
+    }),
   },
   solicitudesTitle: { fontSize: 14, fontWeight: '700' },
   solicitudRow: {

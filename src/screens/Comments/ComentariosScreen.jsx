@@ -91,6 +91,7 @@ function CommentRow({
   onReply,
   onDelete,
   onReport,
+  onOpenProfile,
   formatearFecha,
   likeBusyId,
 }) {
@@ -101,11 +102,14 @@ function CommentRow({
 
   return (
     <View style={[styles.commentWrap, { marginLeft: indent }]}>
-      <View
+      <TouchableOpacity
         style={[
           styles.avatarRing,
           { width: avatarSize + 4, height: avatarSize + 4, borderColor: palette.border },
         ]}
+        onPress={() => onOpenProfile?.(item.user_id)}
+        activeOpacity={0.7}
+        disabled={!item.user_id}
       >
         <View
           style={[
@@ -138,7 +142,7 @@ function CommentRow({
             </Text>
           )}
         </View>
-      </View>
+      </TouchableOpacity>
 
       <View
         style={[
@@ -150,12 +154,19 @@ function CommentRow({
         ]}
       >
         <View style={styles.commentCardHeader}>
-          <Text style={[styles.commentAuthor, { color: palette.text }]} numberOfLines={1}>
-            {item.users?.nombre || 'Usuario'}
-            {esMio ? (
-              <Text style={[styles.youBadge, { color: palette.primary }]}> · Tú</Text>
-            ) : null}
-          </Text>
+          <TouchableOpacity
+            onPress={() => onOpenProfile?.(item.user_id)}
+            activeOpacity={0.7}
+            disabled={!item.user_id}
+            style={{ flex: 1, marginRight: 8 }}
+          >
+            <Text style={[styles.commentAuthor, { color: palette.text }]} numberOfLines={1}>
+              {item.users?.nombre || 'Usuario'}
+              {esMio ? (
+                <Text style={[styles.youBadge, { color: palette.primary }]}> · Tú</Text>
+              ) : null}
+            </Text>
+          </TouchableOpacity>
           <Text style={[styles.commentTime, { color: palette.textMuted }]}>
             {formatearFecha(item.created_at)}
           </Text>
@@ -244,6 +255,21 @@ export default function ComentariosScreen({ route, navigation }) {
     [comentarios]
   );
 
+  const mergeComentarioEntrante = useCallback((data) => {
+    if (!data?.id) return;
+    setComentarios((prev) =>
+      (prev.some((c) => c.id === data.id) ? prev : [...prev, data])
+    );
+    setLikesMap((prev) => ({
+      ...prev,
+      [data.id]: prev[data.id] || { count: 0, liked: false },
+    }));
+    setTimeout(
+      () => flatListRef.current?.scrollToEnd({ animated: true }),
+      120
+    );
+  }, []);
+
   const cargarComentarios = useCallback(async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -252,7 +278,7 @@ export default function ComentariosScreen({ route, navigation }) {
       const { data, error } = await supabase
         .from('comentarios')
         .select(
-          'id, user_id, contenido_id, tipo, texto, created_at, parent_id, users(nombre, avatar_url)'
+          'id, user_id, contenido_id, tipo, texto, created_at, parent_id, users(id, nombre, avatar_url)'
         )
         .eq('contenido_id', contenidoId)
         .eq('tipo', tipo)
@@ -281,40 +307,42 @@ export default function ComentariosScreen({ route, navigation }) {
   }, [cargarComentarios]);
 
   useEffect(() => {
+    const cid = String(contenidoId);
     const channel = supabase
-      .channel(`comentarios-${contenidoId}`)
+      .channel(`comentarios-${cid}-${tipo}`)
       .on(
         'postgres_changes',
         {
           event: 'INSERT',
           schema: 'public',
           table: 'comentarios',
-          filter: `contenido_id=eq.${contenidoId}`,
+          filter: `contenido_id=eq.${cid}`,
         },
         async (payload) => {
-          const { data } = await supabase
+          const row = payload.new;
+          if (!row?.id) return;
+          if (String(row.contenido_id) !== cid || row.tipo !== tipo) return;
+
+          const { data, error } = await supabase
             .from('comentarios')
             .select(
-              'id, user_id, contenido_id, tipo, texto, created_at, parent_id, users(nombre, avatar_url)'
+              'id, user_id, contenido_id, tipo, texto, created_at, parent_id, users(id, nombre, avatar_url)'
             )
-            .eq('id', payload.new.id)
+            .eq('id', row.id)
             .maybeSingle();
-          if (data) {
-            setComentarios((prev) =>
-              prev.some((c) => c.id === data.id) ? prev : [...prev, data]
-            );
-            setLikesMap((prev) => ({ ...prev, [data.id]: prev[data.id] || { count: 0, liked: false } }));
-            setTimeout(
-              () => flatListRef.current?.scrollToEnd({ animated: true }),
-              120
-            );
+          if (error) {
+            console.warn('comentarios realtime fetch:', error.message);
+            return;
           }
+          if (data) mergeComentarioEntrante(data);
         }
       )
       .subscribe();
 
-    return () => supabase.removeChannel(channel);
-  }, [contenidoId]);
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [contenidoId, tipo, mergeComentarioEntrante]);
 
   const enviarComentario = async () => {
     if (!texto.trim() || enviando) return;
@@ -333,12 +361,21 @@ export default function ComentariosScreen({ route, navigation }) {
       };
       if (replyingTo?.id) row.parent_id = replyingTo.id;
 
-      const { error } = await supabase.from('comentarios').insert(row);
+      const { data: nuevo, error } = await supabase
+        .from('comentarios')
+        .insert(row)
+        .select(
+          'id, user_id, contenido_id, tipo, texto, created_at, parent_id, users(id, nombre, avatar_url)'
+        )
+        .single();
+
       if (error) throw error;
+
+      mergeComentarioEntrante(nuevo);
       setTexto('');
       setReplyingTo(null);
     } catch (e) {
-      Alert.alert('Error', e.message);
+      Alert.alert('Error', e.message || 'No se pudo publicar el comentario');
     } finally {
       setEnviando(false);
     }
@@ -448,6 +485,12 @@ export default function ComentariosScreen({ route, navigation }) {
     return d.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' });
   };
 
+  const abrirPerfilUsuario = (userId) => {
+    if (!userId) return;
+    if (userId === currentUser?.id) navigation.navigate('Profile');
+    else navigation.navigate('UserProfile', { userId });
+  };
+
   const styles = makeStyles(palette);
 
   const renderRow = ({ item: { node, depth } }) => (
@@ -465,6 +508,7 @@ export default function ComentariosScreen({ route, navigation }) {
       }}
       onDelete={eliminarComentario}
       onReport={reportarComentario}
+      onOpenProfile={abrirPerfilUsuario}
       formatearFecha={formatearFecha}
       likeBusyId={likeBusyId}
     />

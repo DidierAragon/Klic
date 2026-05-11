@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, StyleSheet, Image, TouchableOpacity,
   ActivityIndicator, RefreshControl, FlatList,
-  Share, Alert
+  Share, Alert, useWindowDimensions,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,14 +17,22 @@ import { useWallet } from '../../context/WalletContext';
 import FAB from '../../components/FAB';
 import VideoPlayer from '../../components/VideoPlayer';
 import KlicCoin from '../../components/KlicCoin';
+import { enviarSolicitudAmistad } from '../../utils/amigos';
 
 export default function HomeScreen({ navigation }) {
   const { palette } = useTema();
+  const { width: winW, height: winH } = useWindowDimensions();
+  const videoPreviewHeight = Math.min(
+    Math.max(260, Math.round(winW * (16 / 9))),
+    Math.round(winH * 0.58),
+    640,
+  );
   const [publicaciones, setPublicaciones] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [compras, setCompras] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [notifCount, setNotifCount] = useState(0);
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const { balance, buyContent, refreshWallet } = useWallet();
 
@@ -34,13 +43,13 @@ export default function HomeScreen({ navigation }) {
 
       const [{ data: f }, { data: o }, { data: v }, { data: c }] = await Promise.all([
         supabase.from('fotos_perfil')
-          .select('*, users(nombre, avatar_url)')
+          .select('*, users(id, nombre, avatar_url)')
           .order('created_at', { ascending: false }).limit(30),
         supabase.from('opiniones')
-          .select('*, users(nombre, avatar_url)')
+          .select('*, users(id, nombre, avatar_url)')
           .order('created_at', { ascending: false }).limit(30),
         supabase.from('videos')
-          .select('*, users(nombre, avatar_url)')
+          .select('*, users(id, nombre, avatar_url)')
           .order('created_at', { ascending: false }).limit(20),
         user
           ? supabase.from('compras').select('contenido_id').eq('comprador_id', user.id)
@@ -64,6 +73,45 @@ export default function HomeScreen({ navigation }) {
   }, []);
 
   useEffect(() => { cargarTodo(); }, [cargarTodo]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      (async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user || cancelled) return;
+
+        const [{ count: sol }, { data: amistades }] = await Promise.all([
+          supabase
+            .from('amigos')
+            .select('*', { count: 'exact', head: true })
+            .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`)
+            .eq('estado', 'pendiente')
+            .neq('solicitante_id', user.id),
+          supabase
+            .from('amigos')
+            .select('id')
+            .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`)
+            .eq('estado', 'aceptado'),
+        ]);
+
+        const ids = (amistades || []).map((a) => a.id);
+        let unread = 0;
+        if (ids.length > 0) {
+          const { count } = await supabase
+            .from('mensajes_amigos')
+            .select('*', { count: 'exact', head: true })
+            .in('amistad_id', ids)
+            .eq('leido', false)
+            .neq('sender_id', user.id);
+          unread = count || 0;
+        }
+
+        if (!cancelled) setNotifCount((sol || 0) + unread);
+      })();
+      return () => { cancelled = true; };
+    }, [])
+  );
 
   const onRefresh = () => { setRefreshing(true); cargarTodo(); };
 
@@ -152,17 +200,30 @@ export default function HomeScreen({ navigation }) {
     </View>
   );
 
+  const abrirPerfilAutor = (item) => {
+    const uid = item.user_id;
+    if (!uid) return;
+    if (uid === currentUser?.id) navigation.navigate('Profile');
+    else navigation.navigate('UserProfile', { userId: uid });
+  };
+
   const renderPostHeader = (item) => (
     <View style={styles.postHeader}>
-      {renderAvatar(item.users)}
-      <View style={{ flex: 1 }}>
-        <Text style={styles.postNombre}>{item.users?.nombre || 'Usuario'}</Text>
-        <Text style={styles.postFecha}>
-          {new Date(item.created_at).toLocaleDateString('es-CO', {
-            day: 'numeric', month: 'short'
-          })}
-        </Text>
-      </View>
+      <TouchableOpacity
+        onPress={() => abrirPerfilAutor(item)}
+        activeOpacity={0.7}
+        style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 }}
+      >
+        {renderAvatar(item.users)}
+        <View style={{ flex: 1 }}>
+          <Text style={styles.postNombre}>{item.users?.nombre || 'Usuario'}</Text>
+          <Text style={styles.postFecha}>
+            {new Date(item.created_at).toLocaleDateString('es-CO', {
+              day: 'numeric', month: 'short'
+            })}
+          </Text>
+        </View>
+      </TouchableOpacity>
       {item.precio > 0 && (
         <View style={[styles.priceTag, { backgroundColor: palette.primary + '30' }]}>
           <Ionicons name="pricetag" size={12} color={palette.primary} />
@@ -182,7 +243,20 @@ export default function HomeScreen({ navigation }) {
       <LikeButton contenidoId={item.id} tipo={tipo} />
 
       {/* Amigo */}
-      <TouchableOpacity style={styles.actionBtn}>
+      <TouchableOpacity
+        style={styles.actionBtn}
+        onPress={async () => {
+          if (!currentUser) {
+            Alert.alert('Sesión', 'Inicia sesión para conectar con otros usuarios');
+            return;
+          }
+          const uid = item.user_id;
+          if (!uid || uid === currentUser.id) return;
+          const res = await enviarSolicitudAmistad(supabase, currentUser.id, uid);
+          if (!res.ok) Alert.alert('Amigos', res.message);
+          else Alert.alert('Listo', res.action === 'resent' ? 'Solicitud reenviada' : 'Solicitud enviada');
+        }}
+      >
         <Ionicons name="people-outline" size={20} color={palette.secondary} />
         <Text style={[styles.actionCount, { color: palette.secondary }]}>Amigo</Text>
       </TouchableOpacity>
@@ -305,7 +379,7 @@ export default function HomeScreen({ navigation }) {
         <View style={{ position: 'relative', overflow: 'hidden' }}>
           <VideoPlayer
             url={item.url}
-            height={280}
+            height={videoPreviewHeight}
             bloqueado={bloqueado}
           />
           {bloqueado && (
@@ -370,8 +444,28 @@ export default function HomeScreen({ navigation }) {
             <KlicCoin size={16} />
             <Text style={[styles.coinText, { color: palette.text, marginLeft: 6 }]}>{balance}</Text>
           </TouchableOpacity>
-          <TouchableOpacity>
-            <Ionicons name="notifications-outline" size={24} color={palette.textMuted} />
+          <TouchableOpacity
+            style={[styles.headerIconBtn, { backgroundColor: palette.panelSoft, borderColor: palette.border }]}
+            onPress={() => navigation.navigate('SearchUsers')}
+            accessibilityLabel="Buscar personas"
+          >
+            <Ionicons name="search-outline" size={22} color={palette.text} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.headerIconBtn, { backgroundColor: palette.panelSoft, borderColor: palette.border }]}
+            onPress={() => navigation.navigate('Notifications')}
+            accessibilityLabel="Notificaciones"
+          >
+            <View>
+              <Ionicons name="notifications-outline" size={22} color={palette.text} />
+              {notifCount > 0 ? (
+                <View style={[styles.notifBadge, { backgroundColor: palette.primary }]}>
+                  <Text style={styles.notifBadgeText}>
+                    {notifCount > 99 ? '99+' : notifCount}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
           </TouchableOpacity>
         </View>
       </View>
@@ -420,7 +514,31 @@ const makeStyles = (palette) => StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: palette.border,
   },
   logo: { fontSize: 22, fontWeight: '900', letterSpacing: 2 },
-  topActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  topActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerIconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  notifBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -8,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  notifBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
+  },
   coinBadge: {
     flexDirection: 'row',
     alignItems: 'center',

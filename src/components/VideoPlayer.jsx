@@ -1,20 +1,27 @@
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View, TouchableOpacity, StyleSheet,
-  ActivityIndicator, Text
+  ActivityIndicator, Text, Modal,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
 import { useTema } from '../context/TemaContext';
 
-export default function VideoPlayer({ url, height = 300, bloqueado = false }) {
+export default function VideoPlayer({ url, height = 280, bloqueado = false }) {
   const { palette } = useTema();
+  const insets = useSafeAreaInsets();
   const [playing, setPlaying] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
-  const ref = useRef(null);
+  const [fullscreen, setFullscreen] = useState(false);
 
   const player = useVideoPlayer(url, (p) => {
+    p.loop = false;
+    p.volume = 1.0;
+  });
+
+  const playerFullscreen = useVideoPlayer(url, (p) => {
     p.loop = false;
     p.volume = 1.0;
   });
@@ -32,11 +39,24 @@ export default function VideoPlayer({ url, height = 300, bloqueado = false }) {
       }
     } catch (e) {
       setError(true);
-      console.warn('VideoPlayer error:', e);
     } finally {
       setLoading(false);
     }
   }, [playing, player, bloqueado]);
+
+  const abrirFullscreen = async () => {
+    player.pause();
+    setPlaying(false);
+    setFullscreen(true);
+    try {
+      await playerFullscreen.play();
+    } catch (e) { console.warn(e); }
+  };
+
+  const cerrarFullscreen = () => {
+    playerFullscreen.pause();
+    setFullscreen(false);
+  };
 
   if (error) {
     return (
@@ -50,50 +70,87 @@ export default function VideoPlayer({ url, height = 300, bloqueado = false }) {
   }
 
   return (
-    <View style={[styles.container, { height }]}>
-      <VideoView
-        ref={ref}
-        player={player}
-        style={styles.video}
-        contentFit="cover"
-        nativeControls={playing}
-      />
+    <>
+      {/* Modal pantalla completa */}
+      <Modal
+        visible={fullscreen}
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={cerrarFullscreen}
+      >
+        <View style={styles.fullscreenContainer}>
+          <VideoView
+            player={playerFullscreen}
+            style={styles.fullscreenVideo}
+            contentFit="contain"
+            nativeControls
+          />
+          <TouchableOpacity
+            style={[styles.closeFullscreen, { top: insets.top + 12 }]}
+            onPress={cerrarFullscreen}
+          >
+            <View style={styles.closeBtn}>
+              <Ionicons name="close" size={24} color="#fff" />
+            </View>
+          </TouchableOpacity>
+        </View>
+      </Modal>
 
-      {/* Overlay con botón play cuando no está reproduciendo */}
-      {!playing && (
-        <TouchableOpacity
-          style={styles.playOverlay}
-          onPress={togglePlay}
-          activeOpacity={0.8}
-        >
-          <View style={[styles.playBtn, { backgroundColor: 'rgba(0,0,0,0.55)' }]}>
-            {loading
-              ? <ActivityIndicator size="large" color="#fff" />
-              : <Ionicons name="play" size={42} color="#fff" />
-            }
-          </View>
-        </TouchableOpacity>
-      )}
+      {/* Video en feed */}
+      <View style={[styles.container, { height }]}>
+        <VideoView
+          player={player}
+          style={styles.video}
+          contentFit="contain"
+          nativeControls={false}
+        />
 
-      {/* Botón pausa cuando está reproduciendo */}
-      {playing && (
-        <TouchableOpacity
-          style={styles.pauseOverlay}
-          onPress={togglePlay}
-          activeOpacity={0.7}
-        >
-          <View style={[styles.pauseBtn, { backgroundColor: 'rgba(0,0,0,0.4)' }]}>
-            <Ionicons name="pause" size={20} color="#fff" />
+        {/* Overlay play */}
+        {!playing && (
+          <TouchableOpacity
+            style={styles.playOverlay}
+            onPress={togglePlay}
+            activeOpacity={0.8}
+          >
+            <View style={[styles.playBtn, { backgroundColor: 'rgba(0,0,0,0.6)' }]}>
+              {loading
+                ? <ActivityIndicator size="large" color="#fff" />
+                : <Ionicons name="play" size={42} color="#fff" />
+              }
+            </View>
+          </TouchableOpacity>
+        )}
+
+        {/* Controles cuando está reproduciendo */}
+        {playing && (
+          <View style={styles.controls}>
+            <TouchableOpacity onPress={togglePlay} style={styles.controlBtn}>
+              <Ionicons name="pause" size={22} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={abrirFullscreen} style={styles.controlBtn}>
+              <Ionicons name="expand" size={22} color="#fff" />
+            </TouchableOpacity>
           </View>
-        </TouchableOpacity>
-      )}
-    </View>
+        )}
+
+        {/* Botón fullscreen cuando no está reproduciendo */}
+        {!playing && !loading && (
+          <TouchableOpacity
+            style={styles.expandBtn}
+            onPress={abrirFullscreen}
+          >
+            <Ionicons name="expand-outline" size={20} color="#fff" />
+          </TouchableOpacity>
+        )}
+      </View>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   container: { width: '100%', backgroundColor: '#000' },
   video: { width: '100%', height: '100%' },
+
   playOverlay: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
@@ -103,14 +160,45 @@ const styles = StyleSheet.create({
     width: 72, height: 72, borderRadius: 36,
     justifyContent: 'center', alignItems: 'center',
   },
-  pauseOverlay: {
+
+  controls: {
     position: 'absolute',
-    top: 10, right: 10,
+    bottom: 10, right: 10,
+    flexDirection: 'row', gap: 8,
   },
-  pauseBtn: {
+  controlBtn: {
     width: 36, height: 36, borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+
+  expandBtn: {
+    position: 'absolute',
+    bottom: 10, right: 10,
+    width: 34, height: 34, borderRadius: 17,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+
+  // Fullscreen
+  fullscreenContainer: {
+    flex: 1, backgroundColor: '#000',
     justifyContent: 'center', alignItems: 'center',
   },
+  fullscreenVideo: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  closeFullscreen: {
+    position: 'absolute',
+    left: 16,
+    zIndex: 2,
+  },
+  closeBtn: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+
   errorBox: {
     justifyContent: 'center', alignItems: 'center', gap: 8,
   },

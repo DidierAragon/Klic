@@ -38,6 +38,11 @@
       ],
       "expo-video",
       "expo-task-manager"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "61e44944-645a-4065-9ae6-6212286c4b38"
+      }
+    }
   }
 }

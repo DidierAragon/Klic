@@ -28,6 +28,7 @@ import SearchUsersScreen from './src/screens/Social/SearchUsersScreen';
 import NotificationsScreen from './src/screens/Home/NotificationsScreen';
 import MyPurchasesScreen from './src/screens/Settings/MyPurchasesScreen';
 import PostDetailScreen from './src/screens/Home/PostDetailScreen';
+import VerificacionDocumentoScreen from './src/screens/Profile/VerificacionDocumentoScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -68,6 +69,7 @@ function AppInner({ session }) {
             <Stack.Screen name="Notifications" component={NotificationsScreen} />
             <Stack.Screen name="MyPurchases" component={MyPurchasesScreen} />
             <Stack.Screen name="PostDetail" component={PostDetailScreen} />
+            <Stack.Screen name="VerificacionDocumento" component={VerificacionDocumentoScreen} />
           </Stack.Navigator>
         ) : (
           <Stack.Navigator initialRouteName="Login" screenOptions={{ headerShown: false }}>

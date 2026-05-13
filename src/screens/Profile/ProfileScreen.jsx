@@ -77,7 +77,7 @@ export default function ProfileScreen({ navigation }) {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaType.Images,
+      mediaTypes: ['images'],
       allowsEditing: true, aspect: [1, 1], quality: 0.75,
       base64: true,
     });
@@ -355,7 +355,7 @@ export default function ProfileScreen({ navigation }) {
               borderColor: palette.primary,
               backgroundColor: palette.primary + '15'
             }]}
-            onPress={() => Alert.alert('Próximamente', 'La verificación de identidad estará disponible pronto.')}
+            onPress={() => navigation.navigate('VerificacionDocumento')}
             activeOpacity={0.7}
           >
             <Ionicons name="id-card-outline" size={20} color={palette.primary} />

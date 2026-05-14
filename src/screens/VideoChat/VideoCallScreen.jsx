@@ -32,7 +32,10 @@ const MOTIVOS_REPORTE = [
 ];
 
 export default function VideoCallScreen({ navigation, route }) {
-  const { sesionId, otroUserId, esCaller } = route.params;
+  const sesionId = route?.params?.sesionId ?? null;
+  const otroUserId = route?.params?.otroUserId ?? null;
+  const esCaller = route?.params?.esCaller === true;
+  const paramsOk = Boolean(sesionId && otroUserId);
   const { palette } = useTema();
 
   const [conectando, setConectando] = useState(true);
@@ -64,6 +67,7 @@ export default function VideoCallScreen({ navigation, route }) {
 
   // Cargar info del otro usuario
   useEffect(() => {
+    if (!otroUserId) return;
     const cargar = async () => {
       const { data } = await supabase
         .from('users')
@@ -77,9 +81,11 @@ export default function VideoCallScreen({ navigation, route }) {
 
   // Iniciar WebRTC
   useEffect(() => {
+    if (!paramsOk) return undefined;
     iniciarWebRTC();
     return () => limpiar();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- iniciarWebRTC usa sesionId/esCaller del render actual
+  }, [paramsOk, sesionId, otroUserId, esCaller]);
 
   const iniciarWebRTC = async () => {
     try {
@@ -348,6 +354,19 @@ export default function VideoCallScreen({ navigation, route }) {
   };
 
   const styles = makeStyles(palette);
+
+  if (!paramsOk) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: palette.bg, padding: 24 }}>
+        <Text style={{ color: palette.text, textAlign: 'center', marginBottom: 16 }}>
+          No se pudo abrir la videollamada (datos incompletos). Vuelve a Video Chat e inténtalo de nuevo.
+        </Text>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={{ padding: 12 }}>
+          <Text style={{ color: palette.primary, fontWeight: '700' }}>Volver</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
     <Animated.View style={[styles.wrapper, { opacity: fadeAnim }]}>

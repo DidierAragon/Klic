@@ -9,6 +9,13 @@ import { supabase } from '../../services/supabase';
 import { radii } from '../../theme/ui';
 import { useTema } from '../../context/TemaContext';
 
+/** Solo en desarrollo: mira la terminal donde corre `npx expo start` (Metro). */
+function logVideoChat(tag, payload) {
+  if (!__DEV__) return;
+  // eslint-disable-next-line no-console
+  console.warn(`[VideoChat:${tag}]`, typeof payload === 'string' ? payload : payload);
+}
+
 export default function SalaEsperaScreen({ navigation }) {
   const { palette } = useTema();
   const [buscando, setBuscando] = useState(false);
@@ -83,7 +90,11 @@ export default function SalaEsperaScreen({ navigation }) {
       }, () => {
         contarUsuarios();
       })
-      .subscribe();
+      .subscribe((status, err) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          logVideoChat('realtime-cola', { status, err: err?.message ?? err });
+        }
+      });
 
     contarUsuarios();
 
@@ -91,9 +102,13 @@ export default function SalaEsperaScreen({ navigation }) {
   }, []);
 
   const contarUsuarios = async () => {
-    const { count } = await supabase
+    const { count, error } = await supabase
       .from('video_cola')
       .select('*', { count: 'exact', head: true });
+    if (error) {
+      logVideoChat('contar-cola', { message: error.message, code: error.code, details: error.details });
+      return;
+    }
     setUsuariosEnLinea(count || 0);
   };
 
@@ -192,15 +207,21 @@ export default function SalaEsperaScreen({ navigation }) {
     try {
       const { data, error } = await supabase.rpc('emparejar_video_cola');
       if (error) {
-        console.warn('emparejar_video_cola', error.message, error);
+        logVideoChat('rpc-emparejar', {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+        });
         return;
       }
       if (data && typeof data === 'object' && data.sesion_id) {
+        logVideoChat('rpc-match', { sesionId: data.sesion_id, otro: data.otro_user_id, esCaller: data.es_caller });
         sesionIdRef.current = data.sesion_id;
         irALlamada(data.sesion_id, data.otro_user_id, data.es_caller === true);
       }
     } catch (e) {
-      console.warn('emparejar error:', e);
+      logVideoChat('rpc-emparejar-catch', String(e?.message ?? e));
     }
   };
 
@@ -209,7 +230,7 @@ export default function SalaEsperaScreen({ navigation }) {
     const uid = currentUserRef.current?.id;
     if (!uid || matchedRef.current) return;
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('video_sesiones')
         .select('id, user1_id, user2_id, estado')
         .eq('estado', 'conectando')
@@ -218,6 +239,11 @@ export default function SalaEsperaScreen({ navigation }) {
         .limit(1)
         .maybeSingle();
 
+      if (error) {
+        logVideoChat('poll-sesiones', { message: error.message, code: error.code, details: error.details });
+        return;
+      }
+
       if (data?.id && data.estado === 'conectando') {
         const esCaller = data.user1_id === uid;
         const otroUserId = esCaller ? data.user2_id : data.user1_id;
@@ -225,7 +251,7 @@ export default function SalaEsperaScreen({ navigation }) {
         irALlamada(data.id, otroUserId, esCaller);
       }
     } catch (e) {
-      console.warn('poll sesión:', e);
+      logVideoChat('poll-sesiones-catch', String(e?.message ?? e));
     }
   };
 
@@ -246,10 +272,15 @@ export default function SalaEsperaScreen({ navigation }) {
         if (matchedRef.current) return;
         if (sesion.estado === 'conectando') {
           sesionIdRef.current = sesion.id;
+          logVideoChat('realtime-sesion', { sesionId: sesion.id, user1: sesion.user1_id });
           irALlamada(sesion.id, sesion.user1_id, false);
         }
       })
-      .subscribe();
+      .subscribe((status, err) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          logVideoChat('realtime-sesion', { status, err: err?.message ?? err });
+        }
+      });
 
     canalSesionRef.current = canal;
   };
@@ -277,11 +308,19 @@ export default function SalaEsperaScreen({ navigation }) {
     rotateAnim.stopAnimation();
     setBuscando(false);
 
-    navigation.replace('VideoCall', {
-      sesionId,
-      otroUserId,
-      esCaller,
-    });
+    logVideoChat('ir-llamada', { sesionId, otroUserId, esCaller });
+
+    try {
+      navigation.replace('VideoCall', {
+        sesionId,
+        otroUserId,
+        esCaller,
+      });
+    } catch (e) {
+      matchedRef.current = false;
+      logVideoChat('nav-VideoCall', String(e?.message ?? e));
+      Alert.alert('Error', 'No se pudo abrir la videollamada. Prueba de nuevo.');
+    }
   };
 
   // Reintentar emparejamiento y comprobar sesión entrante (el que llegó primero solo intentaba una vez).

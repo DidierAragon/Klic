@@ -201,10 +201,16 @@ export default function ChatAmigoScreen({ route, navigation }) {
       ) : (
         <FlatList
           ref={flatListRef}
+          style={styles.listaFlex}
           data={mensajesConFecha()}
           keyExtractor={item => item.id}
           renderItem={renderItem}
-          contentContainerStyle={styles.lista}
+          contentContainerStyle={[
+            styles.lista,
+            mensajes.length > 0
+              ? styles.listaContenidoConMensajes
+              : styles.listaContenidoVacio,
+          ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           onContentSizeChange={() =>
@@ -283,7 +289,10 @@ const makeStyles = (palette) => StyleSheet.create({
   headerStatus: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   statusDot: { width: 7, height: 7, borderRadius: 4 },
   statusText: { fontSize: 11, fontWeight: '600' },
-  lista: { padding: 12, paddingBottom: 4 },
+  listaFlex: { flex: 1 },
+  lista: { padding: 12, paddingBottom: 8 },
+  listaContenidoConMensajes: { flexGrow: 1, justifyContent: 'flex-end' },
+  listaContenidoVacio: { flexGrow: 1, justifyContent: 'center' },
   fechaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: 12 },
   fechaLine: { flex: 1, height: 1 },
   fechaText: { fontSize: 11, fontWeight: '600', paddingHorizontal: 4 },

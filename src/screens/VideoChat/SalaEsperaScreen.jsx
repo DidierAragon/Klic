@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  ActivityIndicator, Animated, Alert,
+  Animated, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -22,6 +22,8 @@ export default function SalaEsperaScreen({ navigation }) {
   const sesionIdRef = useRef(null);
   const canalColaRef = useRef(null);
   const canalSesionRef = useRef(null);
+  const matchedRef = useRef(false);
+  const matchPollRef = useRef(null);
 
   // Animación de pulso
   const iniciarPulso = () => {
@@ -113,6 +115,7 @@ export default function SalaEsperaScreen({ navigation }) {
   const entrarCola = async () => {
     if (!currentUser) return;
     try {
+      matchedRef.current = false;
       // Insertar en la cola (UNIQUE evita duplicados)
       await supabase.from('video_cola').upsert({
         user_id: currentUser.id,
@@ -138,6 +141,11 @@ export default function SalaEsperaScreen({ navigation }) {
   const salirCola = async () => {
     if (!currentUser) return;
     try {
+      matchedRef.current = false;
+      if (matchPollRef.current) {
+        clearInterval(matchPollRef.current);
+        matchPollRef.current = null;
+      }
       await supabase.from('video_cola').delete().eq('user_id', currentUser.id);
 
       if (canalColaRef.current) {
@@ -161,7 +169,7 @@ export default function SalaEsperaScreen({ navigation }) {
 
   // Intentar emparejar con otro usuario en cola
   const intentarEmparejar = async () => {
-    if (!currentUser) return;
+    if (!currentUser || matchedRef.current) return;
     try {
       // Buscar otro usuario en cola que no seamos nosotros
       const { data: otros } = await supabase
@@ -171,11 +179,14 @@ export default function SalaEsperaScreen({ navigation }) {
         .order('en_espera_desde', { ascending: true })
         .limit(1);
 
-      if (!otros || otros.length === 0) return; // Nadie más en cola
+      if (!otros || otros.length === 0) return;
 
       const otro = otros[0];
 
-      // Crear sesión
+      // Solo el usuario con UUID menor crea la fila (evita dos sesiones si ambos ven la cola a la vez).
+      // En DB: user1_id < user2_id (lexicográfico), coherente con RLS de la migración.
+      if (currentUser.id > otro.user_id) return;
+
       const { data: sesion, error } = await supabase
         .from('video_sesiones')
         .insert({
@@ -191,14 +202,33 @@ export default function SalaEsperaScreen({ navigation }) {
 
       sesionIdRef.current = sesion.id;
 
-      // Eliminar ambos de la cola
-      await supabase.from('video_cola').delete()
-        .in('user_id', [currentUser.id, otro.user_id]);
+      await supabase.from('video_cola').delete().eq('user_id', currentUser.id);
 
-      // Ir a la llamada como caller (quien inicia)
       irALlamada(sesion.id, otro.user_id, true);
     } catch (e) {
       console.warn('emparejar error:', e);
+    }
+  };
+
+  // Respaldo si Realtime falla: detectar sesión donde somos user2 (UUID mayor).
+  const pollSesionEntrante = async () => {
+    if (!currentUser || matchedRef.current) return;
+    try {
+      const { data } = await supabase
+        .from('video_sesiones')
+        .select('id, user1_id, estado')
+        .eq('user2_id', currentUser.id)
+        .eq('estado', 'conectando')
+        .order('inicio', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (data?.id && data.estado === 'conectando') {
+        sesionIdRef.current = data.id;
+        irALlamada(data.id, data.user1_id, false);
+      }
+    } catch (e) {
+      console.warn('poll sesión:', e);
     }
   };
 
@@ -215,6 +245,7 @@ export default function SalaEsperaScreen({ navigation }) {
         filter: `user2_id=eq.${currentUser.id}`,
       }, (payload) => {
         const sesion = payload.new;
+        if (matchedRef.current) return;
         if (sesion.estado === 'conectando') {
           sesionIdRef.current = sesion.id;
           irALlamada(sesion.id, sesion.user1_id, false);
@@ -225,7 +256,24 @@ export default function SalaEsperaScreen({ navigation }) {
     canalSesionRef.current = canal;
   };
 
-  const irALlamada = (sesionId, otroUserId, esCaller) => {
+  const irALlamada = async (sesionId, otroUserId, esCaller) => {
+    if (matchedRef.current) return;
+    matchedRef.current = true;
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('video_cola').delete().eq('user_id', user.id);
+      }
+    } catch (e) {
+      console.warn(e);
+    }
+
+    if (matchPollRef.current) {
+      clearInterval(matchPollRef.current);
+      matchPollRef.current = null;
+    }
+
     detenerTimer();
     detenerPulso();
     rotateAnim.stopAnimation();
@@ -237,6 +285,26 @@ export default function SalaEsperaScreen({ navigation }) {
       esCaller,
     });
   };
+
+  // Reintentar emparejamiento y comprobar sesión entrante (el que llegó primero solo intentaba una vez).
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- tick usa las funciones del mismo render
+  useEffect(() => {
+    if (!buscando || !currentUser) return undefined;
+
+    const tick = () => {
+      void intentarEmparejar();
+      void pollSesionEntrante();
+    };
+    tick();
+    matchPollRef.current = setInterval(tick, 2000);
+
+    return () => {
+      if (matchPollRef.current) {
+        clearInterval(matchPollRef.current);
+        matchPollRef.current = null;
+      }
+    };
+  }, [buscando, currentUser]);
 
   // Limpiar al salir de la pantalla
   useFocusEffect(
@@ -342,6 +410,7 @@ export default function SalaEsperaScreen({ navigation }) {
           <TouchableOpacity
             style={[styles.btnIniciar, { backgroundColor: palette.primary, shadowColor: palette.primary }]}
             onPress={entrarCola}
+            disabled={!currentUser}
             activeOpacity={0.85}
           >
             <Ionicons name="videocam" size={24} color="#fff" />

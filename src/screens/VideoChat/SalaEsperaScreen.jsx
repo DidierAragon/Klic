@@ -167,65 +167,42 @@ export default function SalaEsperaScreen({ navigation }) {
     }
   };
 
-  // Intentar emparejar con otro usuario en cola
+  // Emparejar vía RPC en Postgres (SECURITY DEFINER): insert + borrar cola en una transacción; evita RLS/carreras del cliente.
   const intentarEmparejar = async () => {
     if (!currentUser || matchedRef.current) return;
     try {
-      // Buscar otro usuario en cola que no seamos nosotros
-      const { data: otros } = await supabase
-        .from('video_cola')
-        .select('user_id, en_espera_desde')
-        .neq('user_id', currentUser.id)
-        .order('en_espera_desde', { ascending: true })
-        .limit(1);
-
-      if (!otros || otros.length === 0) return;
-
-      const otro = otros[0];
-
-      // Solo el usuario con UUID menor crea la fila (evita dos sesiones si ambos ven la cola a la vez).
-      // En DB: user1_id < user2_id (lexicográfico), coherente con RLS de la migración.
-      if (currentUser.id > otro.user_id) return;
-
-      const { data: sesion, error } = await supabase
-        .from('video_sesiones')
-        .insert({
-          user1_id: currentUser.id,
-          user2_id: otro.user_id,
-          estado: 'conectando',
-          inicio: new Date().toISOString(),
-        })
-        .select()
-        .single();
-
-      if (error) return;
-
-      sesionIdRef.current = sesion.id;
-
-      await supabase.from('video_cola').delete().eq('user_id', currentUser.id);
-
-      irALlamada(sesion.id, otro.user_id, true);
+      const { data, error } = await supabase.rpc('emparejar_video_cola');
+      if (error) {
+        console.warn('emparejar_video_cola', error.message, error);
+        return;
+      }
+      if (data && typeof data === 'object' && data.sesion_id) {
+        sesionIdRef.current = data.sesion_id;
+        irALlamada(data.sesion_id, data.otro_user_id, data.es_caller === true);
+      }
     } catch (e) {
       console.warn('emparejar error:', e);
     }
   };
 
-  // Respaldo si Realtime falla: detectar sesión donde somos user2 (UUID mayor).
-  const pollSesionEntrante = async () => {
+  // Cualquier sesión conectando donde participemos (respaldo si Realtime falla o el RPC solo impactó en servidor).
+  const pollSesionActiva = async () => {
     if (!currentUser || matchedRef.current) return;
     try {
       const { data } = await supabase
         .from('video_sesiones')
-        .select('id, user1_id, estado')
-        .eq('user2_id', currentUser.id)
+        .select('id, user1_id, user2_id, estado')
         .eq('estado', 'conectando')
+        .or(`user1_id.eq.${currentUser.id},user2_id.eq.${currentUser.id}`)
         .order('inicio', { ascending: false })
         .limit(1)
         .maybeSingle();
 
       if (data?.id && data.estado === 'conectando') {
+        const esCaller = data.user1_id === currentUser.id;
+        const otroUserId = esCaller ? data.user2_id : data.user1_id;
         sesionIdRef.current = data.id;
-        irALlamada(data.id, data.user1_id, false);
+        irALlamada(data.id, otroUserId, esCaller);
       }
     } catch (e) {
       console.warn('poll sesión:', e);
@@ -291,12 +268,12 @@ export default function SalaEsperaScreen({ navigation }) {
   useEffect(() => {
     if (!buscando || !currentUser) return undefined;
 
-    const tick = () => {
-      void intentarEmparejar();
-      void pollSesionEntrante();
+    const tick = async () => {
+      await intentarEmparejar();
+      await pollSesionActiva();
     };
-    tick();
-    matchPollRef.current = setInterval(tick, 2000);
+    void tick();
+    matchPollRef.current = setInterval(() => void tick(), 1000);
 
     return () => {
       if (matchPollRef.current) {

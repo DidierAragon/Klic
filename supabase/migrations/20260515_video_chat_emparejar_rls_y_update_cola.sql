@@ -1,5 +1,7 @@
--- Emparejamiento atómico en servidor (evita fallos de INSERT/DELETE desde el cliente con RLS o carreras).
--- Tras aplicar, el cliente usa supabase.rpc('emparejar_video_cola').
+-- Asegura que emparejar_video_cola vea todas las filas de la cola aunque el dueño
+-- de la función no coincida con las políticas TO authenticated (RLS).
+-- Política UPDATE: el cliente usa upsert() sobre video_cola; sin UPDATE la
+-- segunda búsqueda del mismo usuario puede fallar en silencio.
 
 CREATE OR REPLACE FUNCTION public.emparejar_video_cola()
 RETURNS jsonb
@@ -20,7 +22,6 @@ BEGIN
     RETURN NULL;
   END IF;
 
-  -- Serializa emparejamientos concurrentes (una pareja por transacción).
   PERFORM pg_advisory_xact_lock(778849331);
 
   IF NOT EXISTS (SELECT 1 FROM public.video_cola WHERE user_id = me) THEN
@@ -45,7 +46,6 @@ BEGIN
     u2 := me;
   END IF;
 
-  -- Solo el menor inserta (misma regla que la política RLS de INSERT en video_sesiones).
   IF me <> u1 THEN
     RETURN NULL;
   END IF;
@@ -69,3 +69,9 @@ COMMENT ON FUNCTION public.emparejar_video_cola() IS
 
 REVOKE ALL ON FUNCTION public.emparejar_video_cola() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.emparejar_video_cola() TO authenticated;
+
+DROP POLICY IF EXISTS "video_cola_update_own" ON public.video_cola;
+CREATE POLICY "video_cola_update_own"
+  ON public.video_cola FOR UPDATE TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);

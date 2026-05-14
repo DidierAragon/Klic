@@ -24,6 +24,8 @@ export default function SalaEsperaScreen({ navigation }) {
   const canalSesionRef = useRef(null);
   const matchedRef = useRef(false);
   const matchPollRef = useRef(null);
+  const currentUserRef = useRef(null);
+  const salirColaRef = useRef(() => Promise.resolve());
 
   // Animación de pulso
   const iniciarPulso = () => {
@@ -61,9 +63,14 @@ export default function SalaEsperaScreen({ navigation }) {
     const cargar = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       setCurrentUser(user);
+      currentUserRef.current = user;
     };
     cargar();
   }, []);
+
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
 
   // Escuchar usuarios en línea en la cola
   useEffect(() => {
@@ -113,14 +120,23 @@ export default function SalaEsperaScreen({ navigation }) {
 
   // Entrar a la cola
   const entrarCola = async () => {
-    if (!currentUser) return;
+    const user = currentUserRef.current;
+    if (!user) return;
     try {
       matchedRef.current = false;
       // Insertar en la cola (UNIQUE evita duplicados)
-      await supabase.from('video_cola').upsert({
-        user_id: currentUser.id,
+      const { error: colaError } = await supabase.from('video_cola').upsert({
+        user_id: user.id,
         en_espera_desde: new Date().toISOString(),
       });
+      if (colaError) {
+        console.warn('video_cola upsert', colaError);
+        Alert.alert(
+          'No se pudo unir a la cola',
+          colaError.message || 'Comprueba conexión y que la base de datos esté actualizada (migraciones).',
+        );
+        return;
+      }
 
       setBuscando(true);
       iniciarPulso();
@@ -139,14 +155,15 @@ export default function SalaEsperaScreen({ navigation }) {
 
   // Salir de la cola
   const salirCola = async () => {
-    if (!currentUser) return;
+    const user = currentUserRef.current;
+    if (!user) return;
     try {
       matchedRef.current = false;
       if (matchPollRef.current) {
         clearInterval(matchPollRef.current);
         matchPollRef.current = null;
       }
-      await supabase.from('video_cola').delete().eq('user_id', currentUser.id);
+      await supabase.from('video_cola').delete().eq('user_id', user.id);
 
       if (canalColaRef.current) {
         supabase.removeChannel(canalColaRef.current);
@@ -167,9 +184,11 @@ export default function SalaEsperaScreen({ navigation }) {
     }
   };
 
+  salirColaRef.current = salirCola;
+
   // Emparejar vía RPC en Postgres (SECURITY DEFINER): insert + borrar cola en una transacción; evita RLS/carreras del cliente.
   const intentarEmparejar = async () => {
-    if (!currentUser || matchedRef.current) return;
+    if (!currentUserRef.current || matchedRef.current) return;
     try {
       const { data, error } = await supabase.rpc('emparejar_video_cola');
       if (error) {
@@ -187,19 +206,20 @@ export default function SalaEsperaScreen({ navigation }) {
 
   // Cualquier sesión conectando donde participemos (respaldo si Realtime falla o el RPC solo impactó en servidor).
   const pollSesionActiva = async () => {
-    if (!currentUser || matchedRef.current) return;
+    const uid = currentUserRef.current?.id;
+    if (!uid || matchedRef.current) return;
     try {
       const { data } = await supabase
         .from('video_sesiones')
         .select('id, user1_id, user2_id, estado')
         .eq('estado', 'conectando')
-        .or(`user1_id.eq.${currentUser.id},user2_id.eq.${currentUser.id}`)
+        .or(`user1_id.eq.${uid},user2_id.eq.${uid}`)
         .order('inicio', { ascending: false })
         .limit(1)
         .maybeSingle();
 
       if (data?.id && data.estado === 'conectando') {
-        const esCaller = data.user1_id === currentUser.id;
+        const esCaller = data.user1_id === uid;
         const otroUserId = esCaller ? data.user2_id : data.user1_id;
         sesionIdRef.current = data.id;
         irALlamada(data.id, otroUserId, esCaller);
@@ -211,15 +231,16 @@ export default function SalaEsperaScreen({ navigation }) {
 
   // Escuchar si otro usuario nos empareja
   const escucharEmparejamiento = () => {
-    if (!currentUser) return;
+    const uid = currentUserRef.current?.id;
+    if (!uid) return;
 
     const canal = supabase
-      .channel(`sesion-usuario-${currentUser.id}`)
+      .channel(`sesion-usuario-${uid}`)
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
         table: 'video_sesiones',
-        filter: `user2_id=eq.${currentUser.id}`,
+        filter: `user2_id=eq.${uid}`,
       }, (payload) => {
         const sesion = payload.new;
         if (matchedRef.current) return;
@@ -283,13 +304,14 @@ export default function SalaEsperaScreen({ navigation }) {
     };
   }, [buscando, currentUser]);
 
-  // Limpiar al salir de la pantalla
+  // Limpiar al salir de la pantalla (deps fijas: si [currentUser] cambia mientras la pantalla
+  // está enfocada, React Navigation ejecutaba el cleanup y vaciaba la cola sin quitar "buscando").
   useFocusEffect(
     useCallback(() => {
       return () => {
-        salirCola();
+        void salirColaRef.current();
       };
-    }, [currentUser])
+    }, [])
   );
 
   const styles = makeStyles(palette);

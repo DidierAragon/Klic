@@ -9,6 +9,7 @@ import { useTema } from '../context/TemaContext';
 const ITEMS_BASE = [
   { key: 'Home', label: 'Inicio', icon: 'home-outline', iconActive: 'home' },
   { key: 'SmashOrPass', label: 'Klic', icon: 'flash-outline', iconActive: 'flash' },
+  { key: 'SalaEspera', label: 'Video', icon: 'videocam-outline', iconActive: 'videocam' },
   { key: 'Social', label: 'Social', icon: 'chatbubbles-outline', iconActive: 'chatbubbles' },
   { key: 'Matches', label: 'Matches', icon: 'heart-outline', iconActive: 'heart' },
   { key: 'Profile', label: 'Perfil', icon: 'person-outline', iconActive: 'person' },
@@ -23,41 +24,25 @@ function NavItem({ item, isActive, onPress, palette }) {
     if (isActive) {
       Animated.parallel([
         Animated.spring(scale, {
-          toValue: 1.15,
-          useNativeDriver: true,
-          tension: 120,
-          friction: 6,
+          toValue: 1.15, useNativeDriver: true, tension: 120, friction: 6,
         }),
         Animated.spring(translateY, {
-          toValue: -4,
-          useNativeDriver: true,
-          tension: 120,
-          friction: 6,
+          toValue: -4, useNativeDriver: true, tension: 120, friction: 6,
         }),
         Animated.timing(opacity, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
+          toValue: 1, duration: 200, useNativeDriver: true,
         }),
       ]).start();
     } else {
       Animated.parallel([
         Animated.spring(scale, {
-          toValue: 1,
-          useNativeDriver: true,
-          tension: 120,
-          friction: 6,
+          toValue: 1, useNativeDriver: true, tension: 120, friction: 6,
         }),
         Animated.spring(translateY, {
-          toValue: 0,
-          useNativeDriver: true,
-          tension: 120,
-          friction: 6,
+          toValue: 0, useNativeDriver: true, tension: 120, friction: 6,
         }),
         Animated.timing(opacity, {
-          toValue: 0.5,
-          duration: 200,
-          useNativeDriver: true,
+          toValue: 0.5, duration: 200, useNativeDriver: true,
         }),
       ]).start();
     }
@@ -71,6 +56,8 @@ function NavItem({ item, isActive, onPress, palette }) {
     onPress();
   };
 
+  const isVideo = item.key === 'SalaEspera';
+
   return (
     <TouchableOpacity
       style={styles.item}
@@ -80,18 +67,20 @@ function NavItem({ item, isActive, onPress, palette }) {
       <Animated.View style={[
         styles.iconContainer,
         isActive && { backgroundColor: palette.primary + '20' },
+        isVideo && !isActive && { backgroundColor: palette.secondary + '15' },
         { transform: [{ scale }, { translateY }], opacity }
       ]}>
         <Ionicons
           name={isActive ? item.iconActive : item.icon}
           size={22}
-          color={isActive ? palette.primary : palette.textMuted}
+          color={isActive ? palette.primary : isVideo ? palette.secondary : palette.textMuted}
         />
       </Animated.View>
       <Animated.Text style={[
         styles.label,
-        { opacity, color: isActive ? palette.primary : palette.textMuted },
-        isActive && { fontWeight: '700' }
+        { opacity, color: isActive ? palette.primary : isVideo ? palette.secondary : palette.textMuted },
+        isActive && { fontWeight: '700' },
+        isVideo && !isActive && { fontWeight: '600' },
       ]}>
         {item.label}
       </Animated.Text>

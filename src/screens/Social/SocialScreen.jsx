@@ -38,15 +38,16 @@ export default function SocialScreen({ navigation }) {
   const translateX = useRef(new Animated.Value(0)).current;
   const tabIndicatorX = useRef(new Animated.Value(0)).current;
   const chatsRef = useRef(chats);
+  const canalRef = useRef(null); // ← ref para controlar el canal Realtime
+  const currentUserIdRef = useRef(null);
+
   chatsRef.current = chats;
 
   const animarATab = (idx) => {
     Animated.parallel([
       Animated.spring(translateX, {
         toValue: -idx * SCREEN_WIDTH,
-        useNativeDriver: true,
-        tension: 100,
-        friction: 12,
+        useNativeDriver: true, tension: 100, friction: 12,
       }),
       Animated.spring(tabIndicatorX, {
         toValue: idx * TAB_SLOT,
@@ -62,6 +63,7 @@ export default function SocialScreen({ navigation }) {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       setCurrentUser(user);
+      currentUserIdRef.current = user?.id;
       if (!user) return;
 
       const [
@@ -72,39 +74,27 @@ export default function SocialScreen({ navigation }) {
         { data: chatsData },
         { data: pendingOutData },
       ] = await Promise.all([
-        // Amigos aceptados
         supabase.from('amigos')
-          .select(`
-            id, estado, solicitante_id,
+          .select(`id, estado, solicitante_id,
             user1:user1_id(id, nombre, avatar_url),
-            user2:user2_id(id, nombre, avatar_url)
-          `)
+            user2:user2_id(id, nombre, avatar_url)`)
           .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`)
           .eq('estado', 'aceptado'),
-        // Mis seguidores
         supabase.from('seguidores')
           .select('*, seguidor:seguidor_id(id, nombre, avatar_url)')
           .eq('seguido_id', user.id),
-        // A quienes sigo
         supabase.from('seguidores')
           .select('seguido_id')
           .eq('seguidor_id', user.id),
-        // Solicitudes pendientes
         supabase.from('amigos')
-          .select(`
-            id,
-            solicitante:solicitante_id(id, nombre, avatar_url)
-          `)
+          .select(`id, solicitante:solicitante_id(id, nombre, avatar_url)`)
           .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`)
           .eq('estado', 'pendiente')
           .neq('solicitante_id', user.id),
-        // Chats de amigos
         supabase.from('amigos')
-          .select(`
-            id, created_at,
+          .select(`id, created_at,
             user1:user1_id(id, nombre, avatar_url),
-            user2:user2_id(id, nombre, avatar_url)
-          `)
+            user2:user2_id(id, nombre, avatar_url)`)
           .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`)
           .eq('estado', 'aceptado'),
         supabase.from('amigos')
@@ -114,7 +104,6 @@ export default function SocialScreen({ navigation }) {
           .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`),
       ]);
 
-      // Enriquecer chats con último mensaje
       const chatsConMsg = await Promise.all(
         (chatsData || []).map(async (amistad) => {
           const { data: msgs } = await supabase
@@ -150,6 +139,9 @@ export default function SocialScreen({ navigation }) {
       setSiguiendo((siguiendoData || []).map(s => s.seguido_id));
       setSolicitudes(solicitudesData || []);
       setChats(chatsConMsg);
+
+      // Iniciar canal Realtime solo una vez
+      iniciarCanal(user.id);
     } catch (e) {
       console.warn(e);
     } finally {
@@ -158,59 +150,63 @@ export default function SocialScreen({ navigation }) {
     }
   }, []);
 
+  // Canal Realtime — se crea una sola vez y se reutiliza
+  const iniciarCanal = useCallback((uid) => {
+    if (canalRef.current) return; // Ya existe, no crear otro
+
+    const canal = supabase
+      .channel(`social-inbox-msgs-${uid}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'mensajes_amigos',
+      }, (payload) => {
+        const row = payload.new;
+        const uid = currentUserIdRef.current;
+
+        setChats((prev) => {
+          if (!prev.some((c) => c.id === row.amistad_id)) return prev;
+          const updated = prev.map((c) => {
+            if (c.id !== row.amistad_id) return c;
+            const incUnread = row.sender_id !== uid && !row.leido ? 1 : 0;
+            return {
+              ...c,
+              ultimoMensaje: {
+                contenido: row.contenido,
+                created_at: row.created_at,
+                sender_id: row.sender_id,
+                leido: row.leido,
+              },
+              noLeidos: (c.noLeidos || 0) + incUnread,
+            };
+          });
+          return [...updated].sort((a, b) => {
+            const ta = new Date(a.ultimoMensaje?.created_at || a.created_at || 0).getTime();
+            const tb = new Date(b.ultimoMensaje?.created_at || b.created_at || 0).getTime();
+            return tb - ta;
+          });
+        });
+      })
+      .subscribe();
+
+    canalRef.current = canal;
+  }, []);
+
+  // Limpiar canal al desmontar
+  useEffect(() => {
+    return () => {
+      if (canalRef.current) {
+        supabase.removeChannel(canalRef.current);
+        canalRef.current = null;
+      }
+    };
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       cargarTodo();
     }, [cargarTodo])
   );
-
-  useEffect(() => {
-    if (!currentUser?.id) return;
-    const uid = currentUser.id;
-    const channel = supabase
-      .channel(`social-inbox-msgs-${uid}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'mensajes_amigos' },
-        (payload) => {
-          const row = payload.new;
-          const list = chatsRef.current;
-          if (!list.some((c) => c.id === row.amistad_id)) return;
-
-          setChats((prev) => {
-            const updated = prev.map((c) => {
-              if (c.id !== row.amistad_id) return c;
-              const incUnread =
-                row.sender_id !== uid && row.leido === false ? 1 : 0;
-              return {
-                ...c,
-                ultimoMensaje: {
-                  contenido: row.contenido,
-                  created_at: row.created_at,
-                  sender_id: row.sender_id,
-                  leido: row.leido,
-                },
-                noLeidos: (c.noLeidos || 0) + incUnread,
-              };
-            });
-            return [...updated].sort((a, b) => {
-              const ta = new Date(
-                a.ultimoMensaje?.created_at || a.created_at || 0
-              ).getTime();
-              const tb = new Date(
-                b.ultimoMensaje?.created_at || b.created_at || 0
-              ).getTime();
-              return tb - ta;
-            });
-          });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [currentUser?.id]);
 
   const onRefresh = () => { setRefreshing(true); cargarTodo(); };
 
@@ -233,29 +229,18 @@ export default function SocialScreen({ navigation }) {
   const seguir = async (userId) => {
     try {
       const { error } = await supabase.from('seguidores').insert({
-        seguidor_id: currentUser.id,
-        seguido_id: userId,
+        seguidor_id: currentUser.id, seguido_id: userId,
       });
-      if (error) {
-        Alert.alert('No se pudo seguir', error.message);
-        return;
-      }
+      if (error) { Alert.alert('No se pudo seguir', error.message); return; }
       setSiguiendo(prev => [...prev, userId]);
-    } catch (e) {
-      console.warn(e);
-      Alert.alert('Error', e.message || 'Intenta de nuevo');
-    }
+    } catch (e) { Alert.alert('Error', e.message); }
   };
 
   const dejarDeSeguir = async (userId) => {
     try {
       const { error } = await supabase.from('seguidores').delete()
-        .eq('seguidor_id', currentUser.id)
-        .eq('seguido_id', userId);
-      if (error) {
-        Alert.alert('Error', error.message);
-        return;
-      }
+        .eq('seguidor_id', currentUser.id).eq('seguido_id', userId);
+      if (error) { Alert.alert('Error', error.message); return; }
       setSiguiendo(prev => prev.filter(id => id !== userId));
     } catch (e) { console.warn(e); }
   };
@@ -263,28 +248,18 @@ export default function SocialScreen({ navigation }) {
   const onEnviarSolicitudAmistad = async (userId) => {
     try {
       const res = await enviarSolicitudAmistad(supabase, currentUser.id, userId);
-      if (!res.ok) {
-        Alert.alert('Amigos', res.message);
-        return;
-      }
+      if (!res.ok) { Alert.alert('Amigos', res.message); return; }
       Alert.alert('Listo', res.action === 'resent' ? 'Solicitud reenviada' : 'Solicitud enviada');
       setPendingSentIds((prev) => new Set([...prev, userId]));
       cargarTodo();
-    } catch (e) {
-      console.warn(e);
-      Alert.alert('Error', e.message || 'No se pudo enviar');
-    }
+    } catch (e) { Alert.alert('Error', e.message); }
   };
 
   const aceptarSolicitud = async (amistadId) => {
     try {
       const { error } = await supabase.from('amigos')
-        .update({ estado: 'aceptado' })
-        .eq('id', amistadId);
-      if (error) {
-        Alert.alert('Error', error.message);
-        return;
-      }
+        .update({ estado: 'aceptado' }).eq('id', amistadId);
+      if (error) { Alert.alert('Error', error.message); return; }
       setSolicitudes(prev => prev.filter(s => s.id !== amistadId));
       cargarTodo();
     } catch (e) { console.warn(e); }
@@ -293,12 +268,8 @@ export default function SocialScreen({ navigation }) {
   const rechazarSolicitud = async (amistadId) => {
     try {
       const { error } = await supabase.from('amigos')
-        .update({ estado: 'rechazado' })
-        .eq('id', amistadId);
-      if (error) {
-        Alert.alert('Error', error.message);
-        return;
-      }
+        .update({ estado: 'rechazado' }).eq('id', amistadId);
+      if (error) { Alert.alert('Error', error.message); return; }
       setSolicitudes(prev => prev.filter(s => s.id !== amistadId));
     } catch (e) { console.warn(e); }
   };
@@ -342,19 +313,14 @@ export default function SocialScreen({ navigation }) {
     </View>
   );
 
-  // ── CHATS ─────────────────────────────────────────────────────────
   const renderChat = ({ item }) => {
     const otro = getOtroUsuario(item);
     if (!otro) return null;
     const tieneNoLeidos = item.noLeidos > 0;
-
     return (
       <TouchableOpacity
         style={styles.chatItem}
-        onPress={() => navigation.navigate('ChatAmigo', {
-          amistadId: item.id,
-          otroUsuario: otro,
-        })}
+        onPress={() => navigation.navigate('ChatAmigo', { amistadId: item.id, otroUsuario: otro })}
         activeOpacity={0.7}
       >
         <View style={{ position: 'relative' }}>
@@ -386,14 +352,11 @@ export default function SocialScreen({ navigation }) {
                 ? item.ultimoMensaje.sender_id === currentUser?.id
                   ? `Tú: ${item.ultimoMensaje.contenido}`
                   : item.ultimoMensaje.contenido
-                : '👋 Dile hola a tu nuevo amigo'
-              }
+                : '👋 Dile hola a tu nuevo amigo'}
             </Text>
             {tieneNoLeidos && (
               <View style={[styles.badge, { backgroundColor: palette.primary }]}>
-                <Text style={styles.badgeText}>
-                  {item.noLeidos > 9 ? '9+' : item.noLeidos}
-                </Text>
+                <Text style={styles.badgeText}>{item.noLeidos > 9 ? '9+' : item.noLeidos}</Text>
               </View>
             )}
           </View>
@@ -403,11 +366,9 @@ export default function SocialScreen({ navigation }) {
     );
   };
 
-  // ── AMIGOS ────────────────────────────────────────────────────────
   const renderAmigo = ({ item }) => {
     const otro = getOtroUsuario(item);
     if (!otro) return null;
-
     return (
       <View style={styles.userItem}>
         <TouchableOpacity
@@ -422,9 +383,7 @@ export default function SocialScreen({ navigation }) {
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.msgBtn, { backgroundColor: palette.primary }]}
-          onPress={() => navigation.navigate('ChatAmigo', {
-            amistadId: item.id, otroUsuario: otro,
-          })}
+          onPress={() => navigation.navigate('ChatAmigo', { amistadId: item.id, otroUsuario: otro })}
         >
           <Ionicons name="chatbubble-outline" size={16} color="#fff" />
           <Text style={styles.msgBtnText}>Mensaje</Text>
@@ -433,11 +392,9 @@ export default function SocialScreen({ navigation }) {
     );
   };
 
-  // ── SEGUIDORES ────────────────────────────────────────────────────
   const renderSeguidor = ({ item }) => {
     const usuario = item.seguidor;
     const yaSigo = siguiendo.includes(usuario?.id);
-
     return (
       <View style={styles.userItem}>
         <TouchableOpacity
@@ -465,7 +422,6 @@ export default function SocialScreen({ navigation }) {
     );
   };
 
-  // ── BUSCADOR ──────────────────────────────────────────────────────
   const renderResultado = ({ item }) => {
     const yaSigo = siguiendo.includes(item.id);
     const yaAmigo = amigoUserIds.has(item.id);
@@ -525,9 +481,7 @@ export default function SocialScreen({ navigation }) {
         <View style={styles.heroRow}>
           <View style={{ flex: 1 }}>
             <Text style={[styles.heroTitle, { color: palette.text }]}>Social</Text>
-            <Text style={[styles.heroSub, { color: palette.textMuted }]}>
-              Chats, amigos y comunidad
-            </Text>
+            <Text style={[styles.heroSub, { color: palette.textMuted }]}>Chats, amigos y comunidad</Text>
           </View>
           {solicitudes.length > 0 ? (
             <View style={[styles.heroBadge, { backgroundColor: palette.primary }]}>
@@ -559,12 +513,9 @@ export default function SocialScreen({ navigation }) {
         </View>
       </LinearGradient>
 
-      {/* Resultados de búsqueda */}
       {busqueda.length >= 2 ? (
         buscando ? (
-          <View style={styles.center}>
-            <ActivityIndicator color={palette.primary} />
-          </View>
+          <View style={styles.center}><ActivityIndicator color={palette.primary} /></View>
         ) : (
           <FlatList
             data={resultados}
@@ -580,16 +531,13 @@ export default function SocialScreen({ navigation }) {
           />
         )
       ) : (
-          <>
+        <>
           <View style={[styles.tabsShell, { backgroundColor: palette.panelSoft, borderColor: palette.border }]}>
             <View style={styles.tabsRow}>
               {TABS.map((tab, i) => (
                 <TouchableOpacity
                   key={tab}
-                  style={[
-                    styles.tab,
-                    tabIndex === i && { backgroundColor: palette.panel },
-                  ]}
+                  style={[styles.tab, tabIndex === i && { backgroundColor: palette.panel }]}
                   onPress={() => animarATab(i)}
                   activeOpacity={0.85}
                 >
@@ -598,10 +546,7 @@ export default function SocialScreen({ navigation }) {
                     { color: tabIndex === i ? palette.primary : palette.textMuted },
                     tabIndex === i && { fontWeight: '800' },
                   ]}>
-                    {tab}
-                    {tab === 'Amigos' && solicitudes.length > 0
-                      ? ` · ${solicitudes.length}`
-                      : ''}
+                    {tab}{tab === 'Amigos' && solicitudes.length > 0 ? ` · ${solicitudes.length}` : ''}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -613,14 +558,12 @@ export default function SocialScreen({ navigation }) {
             </View>
           </View>
 
-          {/* Contenido tabs */}
           {loading ? (
             <View style={styles.center}>
               <ActivityIndicator size="large" color={palette.primary} />
             </View>
           ) : (
             <Animated.View style={[styles.slides, { transform: [{ translateX }] }]}>
-
               {/* Tab Chats */}
               <View style={styles.slide}>
                 <FlatList
@@ -634,9 +577,7 @@ export default function SocialScreen({ navigation }) {
                     <View style={styles.emptyBox}>
                       <Ionicons name="chatbubbles-outline" size={48} color={palette.textMuted} />
                       <Text style={[styles.emptyText, { color: palette.text }]}>Sin chats aún</Text>
-                      <Text style={[styles.emptySub, { color: palette.textMuted }]}>
-                        Agrega amigos para empezar a chatear
-                      </Text>
+                      <Text style={[styles.emptySub, { color: palette.textMuted }]}>Agrega amigos para empezar a chatear</Text>
                     </View>
                   }
                 />
@@ -664,9 +605,7 @@ export default function SocialScreen({ navigation }) {
                               style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8 }}
                             >
                               {renderAvatar(s.solicitante, 38)}
-                              <Text style={[styles.solicitudNombre, { color: palette.text }]}>
-                                {s.solicitante?.nombre}
-                              </Text>
+                              <Text style={[styles.solicitudNombre, { color: palette.text }]}>{s.solicitante?.nombre}</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                               style={[styles.solicitudBtn, { backgroundColor: palette.primary }]}
@@ -689,9 +628,7 @@ export default function SocialScreen({ navigation }) {
                     <View style={styles.emptyBox}>
                       <Ionicons name="people-outline" size={48} color={palette.textMuted} />
                       <Text style={[styles.emptyText, { color: palette.text }]}>Sin amigos aún</Text>
-                      <Text style={[styles.emptySub, { color: palette.textMuted }]}>
-                        Busca personas por nombre arriba
-                      </Text>
+                      <Text style={[styles.emptySub, { color: palette.textMuted }]}>Busca personas por nombre arriba</Text>
                     </View>
                   }
                 />
@@ -710,9 +647,7 @@ export default function SocialScreen({ navigation }) {
                     <View style={styles.emptyBox}>
                       <Ionicons name="people-outline" size={48} color={palette.textMuted} />
                       <Text style={[styles.emptyText, { color: palette.text }]}>Sin seguidores aún</Text>
-                      <Text style={[styles.emptySub, { color: palette.textMuted }]}>
-                        Comparte tu perfil para conseguir seguidores
-                      </Text>
+                      <Text style={[styles.emptySub, { color: palette.textMuted }]}>Comparte tu perfil para conseguir seguidores</Text>
                     </View>
                   }
                 />
@@ -730,183 +665,48 @@ export default function SocialScreen({ navigation }) {
 const makeStyles = (palette) => StyleSheet.create({
   wrapper: { flex: 1, backgroundColor: palette.bg, justifyContent: 'space-between' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-
-  hero: {
-    paddingTop: 48,
-    paddingBottom: 6,
-  },
-  heroRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingHorizontal: 20,
-    marginBottom: 14,
-  },
+  hero: { paddingTop: 48, paddingBottom: 6 },
+  heroRow: { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 20, marginBottom: 14 },
   heroTitle: { fontSize: 30, fontWeight: '900', letterSpacing: -0.6 },
   heroSub: { fontSize: 13, marginTop: 4, fontWeight: '500' },
-  heroBadge: {
-    minWidth: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 8,
-    marginLeft: 8,
-    marginTop: 4,
-  },
+  heroBadge: { minWidth: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8, marginLeft: 8, marginTop: 4 },
   heroBadgeText: { color: '#fff', fontSize: 12, fontWeight: '800' },
-
-  searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginHorizontal: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOpacity: 0.08,
-        shadowRadius: 12,
-        shadowOffset: { width: 0, height: 4 },
-      },
-      android: { elevation: 3 },
-    }),
-  },
-  searchIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, paddingHorizontal: 12, paddingVertical: 11, borderRadius: radii.lg, borderWidth: 1 },
+  searchIconWrap: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   searchInput: { flex: 1, fontSize: 15 },
-
-  tabsShell: {
-    marginHorizontal: 16,
-    marginTop: 12,
-    marginBottom: 6,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
-  tabsRow: {
-    flexDirection: 'row',
-    position: 'relative',
-  },
+  tabsShell: { marginHorizontal: 16, marginTop: 12, marginBottom: 6, borderRadius: radii.lg, borderWidth: 1, overflow: 'hidden' },
+  tabsRow: { flexDirection: 'row', position: 'relative' },
   tab: { flex: 1, paddingVertical: 12, alignItems: 'center' },
   tabText: { fontSize: 13, fontWeight: '600' },
-  tabIndicator: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    height: 3,
-    borderRadius: 3,
-  },
-
-  slides: {
-    flex: 1, flexDirection: 'row',
-    width: SCREEN_WIDTH * TABS.length,
-  },
+  tabIndicator: { position: 'absolute', bottom: 0, left: 0, height: 3, borderRadius: 3 },
+  slides: { flex: 1, flexDirection: 'row', width: SCREEN_WIDTH * TABS.length },
   slide: { width: SCREEN_WIDTH, flex: 1 },
   lista: { padding: 12, paddingTop: 8, gap: 8 },
   chatsList: { padding: 12, paddingTop: 10, paddingBottom: 20 },
-
-  // Chat item
-  chatItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 12,
-    marginBottom: 10,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: palette.border,
-    backgroundColor: palette.panel,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.07,
-        shadowRadius: 10,
-      },
-      android: { elevation: 2 },
-    }),
-  },
-  onlineDot: {
-    position: 'absolute', bottom: 1, right: 1,
-    width: 11, height: 11, borderRadius: 6,
-    borderWidth: 2, borderColor: palette.panel,
-  },
+  chatItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, gap: 12, marginBottom: 10, borderRadius: radii.lg, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.panel },
+  onlineDot: { position: 'absolute', bottom: 1, right: 1, width: 11, height: 11, borderRadius: 6, borderWidth: 2, borderColor: palette.panel },
   chatInfo: { flex: 1, gap: 3 },
   chatTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   chatNombre: { fontSize: 15, fontWeight: '600' },
   chatFecha: { fontSize: 11 },
   chatBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   chatPreview: { flex: 1, fontSize: 13, marginRight: 8 },
-  badge: {
-    minWidth: 20, height: 20, borderRadius: 10,
-    alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5,
-  },
+  badge: { minWidth: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
   badgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
-
-  // User item
-  userItem: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 12, paddingVertical: 10,
-    gap: 10, backgroundColor: palette.bg,
-  },
+  userItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, gap: 10, backgroundColor: palette.bg },
   avatar: { alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   avatarInitial: { fontWeight: '800' },
   userNombre: { flex: 1, fontSize: 14, fontWeight: '600' },
-
-  msgBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    paddingHorizontal: 12, paddingVertical: 7, borderRadius: radii.pill,
-  },
+  msgBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: radii.pill },
   msgBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
-
-  seguirBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 12, paddingVertical: 7,
-    borderRadius: radii.pill, borderWidth: 1,
-  },
+  seguirBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 7, borderRadius: radii.pill, borderWidth: 1 },
   seguirBtnText: { fontSize: 12, fontWeight: '700' },
-
-  // Solicitudes
-  solicitudesCard: {
-    marginHorizontal: 12,
-    marginTop: 8,
-    marginBottom: 12,
-    padding: 16,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    gap: 12,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOpacity: 0.06,
-        shadowRadius: 8,
-        shadowOffset: { width: 0, height: 2 },
-      },
-      android: { elevation: 2 },
-    }),
-  },
+  solicitudesCard: { marginHorizontal: 12, marginTop: 8, marginBottom: 12, padding: 16, borderRadius: radii.lg, borderWidth: 1, gap: 12 },
   solicitudesTitle: { fontSize: 14, fontWeight: '700' },
-  solicitudRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-  },
+  solicitudRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   solicitudNombre: { flex: 1, fontSize: 13, fontWeight: '600' },
-  solicitudBtn: {
-    width: 32, height: 32, borderRadius: 16,
-    alignItems: 'center', justifyContent: 'center',
-  },
-
-  emptyBox: {
-    alignItems: 'center', paddingVertical: 60, gap: 8,
-  },
+  solicitudBtn: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  emptyBox: { alignItems: 'center', paddingVertical: 60, gap: 8 },
   emptyText: { fontSize: 16, fontWeight: '700' },
   emptySub: { fontSize: 13, textAlign: 'center', paddingHorizontal: 32 },
 });

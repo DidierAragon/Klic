@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, Image, TouchableOpacity, StyleSheet,
   ActivityIndicator, Alert, Animated, PanResponder, Dimensions
@@ -10,17 +10,23 @@ import { radii } from '../../theme/ui';
 import { useTema } from '../../context/TemaContext';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
-const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.25;
+const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.28;
 
 export default function SmashOrPassScreen({ navigation }) {
-  const { palette, glow } = useTema();
+  const { palette } = useTema();
   const [fotos, setFotos] = useState([]);
   const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [votando, setVotando] = useState(false);
 
   const position = useRef(new Animated.ValueXY()).current;
-  const swipeLabel = useRef(new Animated.Value(0)).current;
+  const swipeLabelVal = useRef(new Animated.Value(0)).current;
+
+  // Refs para evitar closures desactualizados
+  const votandoRef = useRef(false);
+  const indexRef = useRef(0);
+  const fotosRef = useRef([]);
+  const currentUserRef = useRef(null);
 
   useEffect(() => { cargarFotos(); }, []);
 
@@ -30,6 +36,7 @@ export default function SmashOrPassScreen({ navigation }) {
       const { data: userData } = await supabase.auth.getUser();
       const user = userData?.user;
       if (!user) return;
+      currentUserRef.current = user;
 
       const { data: votados } = await supabase
         .from('votos').select('foto_id').eq('votante_id', user.id);
@@ -39,10 +46,13 @@ export default function SmashOrPassScreen({ navigation }) {
         .from('fotos_perfil')
         .select('*, users(nombre, avatar_url, fecha_nacimiento)')
         .neq('user_id', user.id)
-        .limit(20);
+        .limit(30);
 
-      setFotos((data || []).filter(f => !votadosSet.has(f.id)));
+      const filtradas = (data || []).filter(f => !votadosSet.has(f.id));
+      setFotos(filtradas);
+      fotosRef.current = filtradas;
       setIndex(0);
+      indexRef.current = 0;
     } catch (e) {
       Alert.alert('Error', e.message);
     } finally {
@@ -60,100 +70,146 @@ export default function SmashOrPassScreen({ navigation }) {
     return edad;
   };
 
-  const votar = async (decision) => {
-    if (votando) return;
-    const foto = fotos[index];
-    if (!foto) return;
+  // Resetear posición
+  const resetCard = useCallback(() => {
+    position.setValue({ x: 0, y: 0 });
+    swipeLabelVal.setValue(0);
+  }, []);
 
-    setVotando(true);
+  // Avanzar al siguiente
+  const avanzar = useCallback(() => {
+    const nuevoIndex = indexRef.current + 1;
+    indexRef.current = nuevoIndex;
+    setIndex(nuevoIndex);
+    resetCard();
+    votandoRef.current = false;
+    setVotando(false);
+  }, [resetCard]);
 
-    const toX = decision === 'smash' ? SCREEN_WIDTH * 1.5
-      : decision === 'pass' ? -SCREEN_WIDTH * 1.5 : 0;
-    const toY = decision === 'parcero' ? -300 : 0;
+  // Registrar voto en background (sin bloquear UI)
+  const registrarVoto = useCallback(async (foto, decision) => {
+    try {
+      const user = currentUserRef.current;
+      if (!user) return;
 
-    Animated.timing(position, {
-      toValue: { x: toX, y: toY },
-      duration: 300,
-      useNativeDriver: false,
-    }).start(async () => {
-      position.setValue({ x: 0, y: 0 });
-      swipeLabel.setValue(0);
+      const { data: existing } = await supabase
+        .from('votos').select('id')
+        .eq('votante_id', user.id)
+        .eq('foto_id', foto.id)
+        .maybeSingle();
 
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
+      if (!existing) {
+        await supabase.from('votos').insert({
+          votante_id: user.id,
+          foto_id: foto.id,
+          decision,
+        });
+      }
 
-        const { data: existing } = await supabase
-          .from('votos').select('id')
-          .eq('votante_id', user.id)
-          .eq('foto_id', foto.id)
-          .maybeSingle();
+      if (decision === 'smash') {
+        const { data: misFootos } = await supabase
+          .from('fotos_perfil').select('id').eq('user_id', user.id);
+        const ids = (misFootos || []).map(f => f.id);
 
-        if (!existing) {
-          await supabase.from('votos').insert({
-            votante_id: user.id, foto_id: foto.id, decision,
-          });
-        }
+        if (ids.length > 0) {
+          const { data: reciproco } = await supabase
+            .from('votos').select('id')
+            .eq('votante_id', foto.user_id)
+            .eq('decision', 'smash')
+            .in('foto_id', ids)
+            .limit(1).maybeSingle();
 
-        if (decision === 'smash') {
-          const { data: misFootos } = await supabase
-            .from('fotos_perfil').select('id').eq('user_id', user.id);
-          const ids = (misFootos || []).map(f => f.id);
+          if (reciproco) {
+            const { data: matchExiste } = await supabase
+              .from('matches').select('id')
+              .or(`and(user1_id.eq.${user.id},user2_id.eq.${foto.user_id}),and(user1_id.eq.${foto.user_id},user2_id.eq.${user.id})`)
+              .maybeSingle();
 
-          if (ids.length > 0) {
-            const { data: reciproco } = await supabase
-              .from('votos').select('id')
-              .eq('votante_id', foto.user_id)
-              .eq('decision', 'smash')
-              .in('foto_id', ids)
-              .limit(1).maybeSingle();
-
-            if (reciproco) {
-              const { data: matchExiste } = await supabase
-                .from('matches').select('id')
-                .or(`and(user1_id.eq.${user.id},user2_id.eq.${foto.user_id}),and(user1_id.eq.${foto.user_id},user2_id.eq.${user.id})`)
-                .maybeSingle();
-
-              if (!matchExiste) {
-                await supabase.from('matches').insert({
-                  user1_id: user.id, user2_id: foto.user_id,
-                });
-                Alert.alert('🔥 ¡Klic!', `Hiciste match con ${foto.users?.nombre || 'alguien'}`);
-              }
+            if (!matchExiste) {
+              await supabase.from('matches').insert({
+                user1_id: user.id,
+                user2_id: foto.user_id,
+              });
+              Alert.alert('🔥 ¡Klic!', `Hiciste match con ${foto.users?.nombre || 'alguien'}`);
             }
           }
         }
-
-        setIndex(prev => prev + 1);
-      } catch (e) {
-        Alert.alert('Error', e.message);
-      } finally {
-        setVotando(false);
       }
-    });
-  };
+    } catch (e) {
+      console.warn('registrarVoto error:', e.message);
+    }
+  }, []);
 
+  // Animar salida de la card
+  const animarSalida = useCallback((decision) => {
+    if (votandoRef.current) return;
+    votandoRef.current = true;
+    setVotando(true);
+
+    const foto = fotosRef.current[indexRef.current];
+    if (!foto) return;
+
+    const toX = decision === 'smash' ? SCREEN_WIDTH * 1.5
+      : decision === 'pass' ? -SCREEN_WIDTH * 1.5 : 0;
+    const toY = decision === 'amigo' ? -400 : 0;
+
+    Animated.timing(position, {
+      toValue: { x: toX, y: toY },
+      duration: 280,
+      useNativeDriver: false,
+    }).start(() => {
+      // Registrar voto en background sin bloquear UI
+      registrarVoto(foto, decision);
+      avanzar();
+    });
+  }, [position, registrarVoto, avanzar]);
+
+  // PanResponder con refs para evitar closures
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponder: () => !votandoRef.current,
+      onMoveShouldSetPanResponder: (_, gesture) =>
+        !votandoRef.current && (Math.abs(gesture.dx) > 5 || Math.abs(gesture.dy) > 5),
+      onPanResponderGrant: () => {
+        position.setOffset({ x: position.x._value, y: position.y._value });
+        position.setValue({ x: 0, y: 0 });
+      },
       onPanResponderMove: (_, gesture) => {
         position.setValue({ x: gesture.dx, y: gesture.dy });
-        swipeLabel.setValue(gesture.dx);
+        swipeLabelVal.setValue(gesture.dx);
       },
       onPanResponderRelease: (_, gesture) => {
+        position.flattenOffset();
         if (gesture.dx > SWIPE_THRESHOLD) {
-          votar('smash');
+          animarSalida('smash');
         } else if (gesture.dx < -SWIPE_THRESHOLD) {
-          votar('pass');
+          animarSalida('pass');
         } else {
           Animated.spring(position, {
             toValue: { x: 0, y: 0 },
             useNativeDriver: false,
+            tension: 40,
+            friction: 5,
           }).start();
-          swipeLabel.setValue(0);
+          swipeLabelVal.setValue(0);
         }
+      },
+      onPanResponderTerminate: (_, gesture) => {
+        position.flattenOffset();
+        Animated.spring(position, {
+          toValue: { x: 0, y: 0 },
+          useNativeDriver: false,
+        }).start();
+        swipeLabelVal.setValue(0);
       },
     })
   ).current;
+
+  // Actualizar ref de animarSalida cuando cambia
+  const animarSalidaRef = useRef(animarSalida);
+  useEffect(() => {
+    animarSalidaRef.current = animarSalida;
+  }, [animarSalida]);
 
   const rotate = position.x.interpolate({
     inputRange: [-SCREEN_WIDTH / 2, 0, SCREEN_WIDTH / 2],
@@ -161,14 +217,16 @@ export default function SmashOrPassScreen({ navigation }) {
     extrapolate: 'clamp',
   });
 
-  const smashOpacity = swipeLabel.interpolate({
+  const smashOpacity = swipeLabelVal.interpolate({
     inputRange: [0, SWIPE_THRESHOLD],
-    outputRange: [0, 1], extrapolate: 'clamp',
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
   });
 
-  const passOpacity = swipeLabel.interpolate({
+  const passOpacity = swipeLabelVal.interpolate({
     inputRange: [-SWIPE_THRESHOLD, 0],
-    outputRange: [1, 0], extrapolate: 'clamp',
+    outputRange: [1, 0],
+    extrapolate: 'clamp',
   });
 
   const styles = makeStyles(palette);
@@ -178,6 +236,7 @@ export default function SmashOrPassScreen({ navigation }) {
       <View style={styles.wrapper}>
         <View style={styles.center}>
           <ActivityIndicator size="large" color={palette.primary} />
+          <Text style={[styles.loadingText, { color: palette.textMuted }]}>Cargando perfiles...</Text>
         </View>
         <MainMenu navigation={navigation} active="SmashOrPass" />
       </View>
@@ -207,17 +266,28 @@ export default function SmashOrPassScreen({ navigation }) {
   const foto = fotos[index];
   const edad = calcularEdad(foto.users?.fecha_nacimiento);
 
+  // Pre-cargar siguiente foto
+  const siguienteFoto = fotos[index + 1];
+
   return (
     <View style={styles.wrapper}>
-
       {/* Header */}
       <View style={styles.header}>
         <Text style={[styles.logo, { color: palette.primary }]}>⚡ Klic</Text>
         <Text style={styles.counter}>{index + 1} / {fotos.length}</Text>
       </View>
 
-      {/* Card swipeable */}
+      {/* Stack de cards */}
       <View style={styles.cardContainer}>
+
+        {/* Card de fondo (siguiente) */}
+        {siguienteFoto && (
+          <View style={[styles.card, styles.cardDetras, { backgroundColor: palette.panel }]}>
+            <Image source={{ uri: siguienteFoto.url }} style={styles.image} resizeMode="cover" />
+          </View>
+        )}
+
+        {/* Card principal (actual) */}
         <Animated.View
           style={[
             styles.card,
@@ -239,7 +309,7 @@ export default function SmashOrPassScreen({ navigation }) {
             <Text style={styles.labelPassText}>PASS</Text>
           </Animated.View>
 
-          {/* Info */}
+          {/* Info usuario */}
           <View style={styles.cardInfo}>
             <View style={{ flex: 1 }}>
               <Text style={styles.cardNombre}>
@@ -253,11 +323,10 @@ export default function SmashOrPassScreen({ navigation }) {
 
       {/* Botones */}
       <View style={styles.botones}>
-
         {/* Pass */}
         <TouchableOpacity
           style={styles.btnPass}
-          onPress={() => votar('pass')}
+          onPress={() => animarSalida('pass')}
           disabled={votando}
           activeOpacity={0.8}
         >
@@ -268,7 +337,7 @@ export default function SmashOrPassScreen({ navigation }) {
         {/* Smash */}
         <TouchableOpacity
           style={[styles.btnSmash, { backgroundColor: palette.primary, shadowColor: palette.primary }]}
-          onPress={() => votar('smash')}
+          onPress={() => animarSalida('smash')}
           disabled={votando}
           activeOpacity={0.8}
         >
@@ -279,13 +348,13 @@ export default function SmashOrPassScreen({ navigation }) {
         {/* Amigo */}
         <TouchableOpacity
           style={[styles.btnAmigo, { borderColor: palette.secondary }]}
-          onPress={() => votar('amigo')}
+          onPress={() => animarSalida('amigo')}
           disabled={votando}
           activeOpacity={0.8}
         >
           <Ionicons name="people-outline" size={32} color={palette.secondary} />
           <Text style={[styles.btnAmigoText, { color: palette.secondary }]}>Amigo</Text>
-        </TouchableOpacity> 
+        </TouchableOpacity>
       </View>
 
       <Text style={styles.hint}>← Desliza para votar →</Text>
@@ -298,6 +367,7 @@ export default function SmashOrPassScreen({ navigation }) {
 const makeStyles = (palette) => StyleSheet.create({
   wrapper: { flex: 1, backgroundColor: palette.bg, justifyContent: 'space-between' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24, gap: 12 },
+  loadingText: { marginTop: 8, fontSize: 14 },
 
   header: {
     flexDirection: 'row', justifyContent: 'space-between',
@@ -311,13 +381,21 @@ const makeStyles = (palette) => StyleSheet.create({
     flex: 1, alignItems: 'center',
     justifyContent: 'center', paddingHorizontal: 16,
   },
+
   card: {
     width: '100%', maxWidth: 360,
     height: 460, borderRadius: radii.xl,
     overflow: 'hidden', backgroundColor: palette.panel,
     borderWidth: 1, borderColor: palette.border,
-    elevation: 8,
+    elevation: 8, position: 'absolute',
   },
+
+  cardDetras: {
+    transform: [{ scale: 0.95 }, { translateY: 10 }],
+    opacity: 0.7,
+    elevation: 4,
+  },
+
   image: { width: '100%', height: '100%', position: 'absolute' },
 
   labelSmash: {
@@ -359,8 +437,7 @@ const makeStyles = (palette) => StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     width: 72, height: 72, borderRadius: 36,
     backgroundColor: palette.panel,
-    borderWidth: 1.5, borderColor: '#fb718540',
-    gap: 2,
+    borderWidth: 1.5, borderColor: '#fb718540', gap: 2,
   },
   btnPassText: { color: '#fb7185', fontSize: 10, fontWeight: '700' },
 

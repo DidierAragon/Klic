@@ -2,8 +2,9 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TextInput,
   TouchableOpacity, ActivityIndicator, Image,
-  KeyboardAvoidingView, Platform, Alert
+  KeyboardAvoidingView, Platform, Alert, StatusBar,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../services/supabase';
 import { radii } from '../../theme/ui';
@@ -12,6 +13,7 @@ import { useTema } from '../../context/TemaContext';
 export default function ChatAmigoScreen({ route, navigation }) {
   const { amistadId, otroUsuario } = route.params;
   const { palette } = useTema();
+  const insets = useSafeAreaInsets();
   const [mensajes, setMensajes] = useState([]);
   const [texto, setTexto] = useState('');
   const [loading, setLoading] = useState(true);
@@ -55,32 +57,22 @@ export default function ChatAmigoScreen({ route, navigation }) {
     const aid = String(amistadId);
     const channel = supabase
       .channel(`chat-amigo-${aid}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'mensajes_amigos',
-          filter: `amistad_id=eq.${aid}`,
-        },
-        async (payload) => {
-          const row = payload.new;
-          setMensajes((prev) =>
-            prev.some((m) => m.id === row.id) ? prev : [...prev, row]
-          );
-          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
-          if (row.sender_id !== currentUserIdRef.current) {
-            await supabase
-              .from('mensajes_amigos')
-              .update({ leido: true })
-              .eq('id', row.id);
-          }
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public',
+        table: 'mensajes_amigos',
+        filter: `amistad_id=eq.${aid}`,
+      }, async (payload) => {
+        const row = payload.new;
+        setMensajes((prev) =>
+          prev.some((m) => m.id === row.id) ? prev : [...prev, row]
+        );
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
+        if (row.sender_id !== currentUserIdRef.current) {
+          await supabase.from('mensajes_amigos').update({ leido: true }).eq('id', row.id);
         }
-      )
+      })
       .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [amistadId]);
 
   const enviarMensaje = async () => {
@@ -91,17 +83,10 @@ export default function ChatAmigoScreen({ route, navigation }) {
     try {
       const { data: nuevo, error } = await supabase
         .from('mensajes_amigos')
-        .insert({
-          amistad_id: amistadId,
-          sender_id: currentUser.id,
-          contenido: textoEnviar,
-        })
-        .select('*')
-        .single();
+        .insert({ amistad_id: amistadId, sender_id: currentUser.id, contenido: textoEnviar })
+        .select('*').single();
       if (error) throw error;
-      setMensajes((prev) =>
-        prev.some((m) => m.id === nuevo.id) ? prev : [...prev, nuevo]
-      );
+      setMensajes((prev) => prev.some((m) => m.id === nuevo.id) ? prev : [...prev, nuevo]);
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
     } catch (e) {
       Alert.alert('Error', e.message);
@@ -142,30 +127,22 @@ export default function ChatAmigoScreen({ route, navigation }) {
       return (
         <View style={styles.fechaRow}>
           <View style={[styles.fechaLine, { backgroundColor: palette.border }]} />
-          <Text style={[styles.fechaText, { color: palette.textMuted }]}>
-            {formatearFecha(item.fecha)}
-          </Text>
+          <Text style={[styles.fechaText, { color: palette.textMuted }]}>{formatearFecha(item.fecha)}</Text>
           <View style={[styles.fechaLine, { backgroundColor: palette.border }]} />
         </View>
       );
     }
-
     const esMio = item.sender_id === currentUser?.id;
     return (
       <View style={[styles.msgRow, esMio && styles.msgRowMio]}>
         <View style={[
           styles.bubble,
-          esMio
-            ? [styles.bubbleMio, { backgroundColor: palette.primary }]
-            : [styles.bubbleOtro, { backgroundColor: palette.panel }],
+          esMio ? [styles.bubbleMio, { backgroundColor: palette.primary }]
+                : [styles.bubbleOtro, { backgroundColor: palette.panel }],
         ]}>
-          <Text style={[styles.msgTexto, { color: esMio ? '#fff' : palette.text }]}>
-            {item.contenido}
-          </Text>
+          <Text style={[styles.msgTexto, { color: esMio ? '#fff' : palette.text }]}>{item.contenido}</Text>
           <View style={styles.msgFooter}>
-            <Text style={[styles.msgHora, {
-              color: esMio ? 'rgba(255,255,255,0.65)' : palette.textMuted
-            }]}>
+            <Text style={[styles.msgHora, { color: esMio ? 'rgba(255,255,255,0.65)' : palette.textMuted }]}>
               {formatearHora(item.created_at)}
             </Text>
             {esMio && (
@@ -181,14 +158,21 @@ export default function ChatAmigoScreen({ route, navigation }) {
     );
   };
 
+  // Offset para Android: altura del status bar
+  const kvOffset = Platform.OS === 'ios' ? 0 : StatusBar.currentHeight || 0;
+
   return (
     <KeyboardAvoidingView
       style={[styles.wrapper, { backgroundColor: palette.bg }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      keyboardVerticalOffset={kvOffset}
     >
       {/* Header */}
-      <View style={[styles.header, { borderBottomColor: palette.border, backgroundColor: palette.panel }]}>
+      <View style={[styles.header, {
+        borderBottomColor: palette.border,
+        backgroundColor: palette.panel,
+        paddingTop: insets.top + 8,
+      }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color={palette.text} />
         </TouchableOpacity>
@@ -201,9 +185,7 @@ export default function ChatAmigoScreen({ route, navigation }) {
           }
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={[styles.headerNombre, { color: palette.text }]}>
-            {otroUsuario?.nombre || 'Amigo'}
-          </Text>
+          <Text style={[styles.headerNombre, { color: palette.text }]}>{otroUsuario?.nombre || 'Amigo'}</Text>
           <View style={styles.headerStatus}>
             <View style={[styles.statusDot, { backgroundColor: palette.secondary }]} />
             <Text style={[styles.statusText, { color: palette.secondary }]}>Amigo</Text>
@@ -224,21 +206,17 @@ export default function ChatAmigoScreen({ route, navigation }) {
           renderItem={renderItem}
           contentContainerStyle={styles.lista}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
           onContentSizeChange={() =>
-            mensajes.length > 0 &&
-            flatListRef.current?.scrollToEnd({ animated: false })
+            mensajes.length > 0 && flatListRef.current?.scrollToEnd({ animated: false })
           }
           ListEmptyComponent={
             <View style={styles.emptyBox}>
               <View style={[styles.emptyIcon, { backgroundColor: palette.primary + '22' }]}>
                 <Ionicons name="people" size={32} color={palette.primary} />
               </View>
-              <Text style={[styles.emptyText, { color: palette.text }]}>
-                ¡Son amigos! 👥
-              </Text>
-              <Text style={[styles.emptySub, { color: palette.textMuted }]}>
-                Di hola a {otroUsuario?.nombre}
-              </Text>
+              <Text style={[styles.emptyText, { color: palette.text }]}>¡Son amigos! 👥</Text>
+              <Text style={[styles.emptySub, { color: palette.textMuted }]}>Di hola a {otroUsuario?.nombre}</Text>
               <View style={styles.sugerencias}>
                 {['👋 Hola!', '¿Cómo estás?', '¡Qué bueno conectar!'].map(s => (
                   <TouchableOpacity
@@ -256,17 +234,23 @@ export default function ChatAmigoScreen({ route, navigation }) {
       )}
 
       {/* Input */}
-      <View style={[styles.inputRow, { backgroundColor: palette.panel, borderTopColor: palette.border }]}>
+      <View style={[styles.inputRow, {
+        backgroundColor: palette.panel,
+        borderTopColor: palette.border,
+        paddingBottom: Math.max(insets.bottom, 8),
+      }]}>
         <TextInput
           style={[styles.input, {
             backgroundColor: palette.panelSoft,
-            color: palette.text, borderColor: palette.border,
+            color: palette.text,
+            borderColor: palette.border,
           }]}
           placeholder={`Mensaje para ${otroUsuario?.nombre}...`}
           placeholderTextColor={palette.textMuted}
           value={texto}
           onChangeText={setTexto}
-          multiline maxLength={500}
+          multiline
+          maxLength={500}
         />
         <TouchableOpacity
           style={[styles.sendBtn, { backgroundColor: texto.trim() ? palette.primary : palette.panelSoft }]}
@@ -288,14 +272,11 @@ const makeStyles = (palette) => StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   header: {
     flexDirection: 'row', alignItems: 'center',
-    paddingTop: 52, paddingBottom: 12,
-    paddingHorizontal: 12, gap: 10, borderBottomWidth: 1,
+    paddingBottom: 12, paddingHorizontal: 12,
+    gap: 10, borderBottomWidth: 1,
   },
   backBtn: { padding: 4 },
-  headerAvatar: {
-    width: 40, height: 40, borderRadius: 20,
-    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
-  },
+  headerAvatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   headerAvatarImg: { width: 40, height: 40, borderRadius: 20 },
   headerAvatarInitial: { fontSize: 16, fontWeight: '800' },
   headerNombre: { fontSize: 16, fontWeight: '700' },
@@ -303,10 +284,7 @@ const makeStyles = (palette) => StyleSheet.create({
   statusDot: { width: 7, height: 7, borderRadius: 4 },
   statusText: { fontSize: 11, fontWeight: '600' },
   lista: { padding: 12, paddingBottom: 4 },
-  fechaRow: {
-    flexDirection: 'row', alignItems: 'center',
-    gap: 8, marginVertical: 12,
-  },
+  fechaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: 12 },
   fechaLine: { flex: 1, height: 1 },
   fechaText: { fontSize: 11, fontWeight: '600', paddingHorizontal: 4 },
   msgRow: { flexDirection: 'row', marginBottom: 3 },
@@ -319,18 +297,15 @@ const makeStyles = (palette) => StyleSheet.create({
   msgHora: { fontSize: 10 },
   inputRow: {
     flexDirection: 'row', alignItems: 'flex-end',
-    padding: 8, gap: 8, borderTopWidth: 1,
-    paddingBottom: Platform.OS === 'ios' ? 28 : 8,
+    paddingHorizontal: 8, paddingTop: 8,
+    gap: 8, borderTopWidth: 1,
   },
   input: {
-    flex: 1, borderRadius: radii.pill,
-    borderWidth: 1, paddingHorizontal: 14,
-    paddingVertical: 9, fontSize: 15, maxHeight: 100,
+    flex: 1, borderRadius: radii.pill, borderWidth: 1,
+    paddingHorizontal: 14, paddingVertical: 9,
+    fontSize: 15, maxHeight: 100,
   },
-  sendBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    alignItems: 'center', justifyContent: 'center',
-  },
+  sendBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   emptyBox: { alignItems: 'center', paddingVertical: 60, paddingHorizontal: 32, gap: 8 },
   emptyIcon: { width: 72, height: 72, borderRadius: 36, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
   emptyText: { fontSize: 20, fontWeight: '800' },

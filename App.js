@@ -29,10 +29,16 @@ import NotificationsScreen from './src/screens/Home/NotificationsScreen';
 import MyPurchasesScreen from './src/screens/Settings/MyPurchasesScreen';
 import PostDetailScreen from './src/screens/Home/PostDetailScreen';
 import VerificacionDocumentoScreen from './src/screens/Profile/VerificacionDocumentoScreen';
+import SalaEsperaScreen from './src/screens/VideoChat/SalaEsperaScreen';
+import VideoCallScreen from './src/screens/VideoChat/VideoCallScreen';
 
 const Stack = createNativeStackNavigator();
 
-const SIN_FAB = ['UploadPhoto', 'Chat', 'ChatAmigo', 'Comentarios', 'CreatorDashboard', 'Login', 'Register', 'SearchUsers', 'Notifications'];
+const SIN_FAB = [
+  'UploadPhoto', 'Chat', 'ChatAmigo', 'Comentarios',
+  'CreatorDashboard', 'Login', 'Register', 'SearchUsers',
+  'Notifications', 'SalaEspera', 'VideoCall',
+];
 
 function AppInner({ session }) {
   const navigationRef = useNavigationContainerRef();
@@ -70,6 +76,12 @@ function AppInner({ session }) {
             <Stack.Screen name="MyPurchases" component={MyPurchasesScreen} />
             <Stack.Screen name="PostDetail" component={PostDetailScreen} />
             <Stack.Screen name="VerificacionDocumento" component={VerificacionDocumentoScreen} />
+            <Stack.Screen name="SalaEspera" component={SalaEsperaScreen} />
+            <Stack.Screen
+              name="VideoCall"
+              component={VideoCallScreen}
+              options={{ orientation: 'portrait' }}
+            />
           </Stack.Navigator>
         ) : (
           <Stack.Navigator initialRouteName="Login" screenOptions={{ headerShown: false }}>
@@ -123,7 +135,7 @@ export default function App() {
           <WalletProvider session={session}>
             <AppInner session={session} />
           </WalletProvider>
-        </TemaProvider> 
+        </TemaProvider>
       </SafeAreaProvider>
     </StripeProvider>
   );

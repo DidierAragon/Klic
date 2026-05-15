@@ -448,7 +448,7 @@ export default function SalaEsperaScreen({ navigation }) {
           <TouchableOpacity
             style={[styles.btnIniciar, { backgroundColor: palette.primary, shadowColor: palette.primary }]}
             onPress={entrarCola}
-            disabled={!currentUser}
+            disabled={!currentUser || buscando}
             activeOpacity={0.85}
           >
             <Ionicons name="videocam" size={24} color="#fff" />

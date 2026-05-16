@@ -16,15 +16,36 @@ import { supabase } from '../../services/supabase';
 import { radii } from '../../theme/ui';
 import { useTema } from '../../context/TemaContext';
 
-const ICE_SERVERS = {
+// Fallback STUN solo si Twilio falla
+const ICE_SERVERS_FALLBACK = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
   ],
 };
 
+const obtenerIceServers = async () => {
+  try {
+    const response = await fetch(
+      `https://api.twilio.com/2010-04-01/Accounts/${process.env.EXPO_PUBLIC_TWILIO_ACCOUNT_SID}/Tokens.json`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Basic ' + btoa(`${process.env.EXPO_PUBLIC_TWILIO_ACCOUNT_SID}:${process.env.EXPO_PUBLIC_TWILIO_AUTH_TOKEN}`),
+        },
+      }
+    );
+    const data = await response.json();
+    return { iceServers: data.ice_servers.map(s => ({
+      urls: s.url,
+      ...(s.username && { username: s.username }),
+      ...(s.credential && { credential: s.credential }),
+    }))};
+  } catch (e) {
+    console.warn('TURN error:', e.message);
+    return ICE_SERVERS_FALLBACK;
+  }
+};
 const MOTIVOS_REPORTE = [
   { key: 'contenido_inapropiado', label: 'Contenido inapropiado', icon: 'eye-off-outline' },
   { key: 'acoso', label: 'Acoso o intimidación', icon: 'warning-outline' },
@@ -92,8 +113,9 @@ export default function VideoCallScreen({ navigation, route }) {
       setLocalStream(stream);
       localStreamRef.current = stream;
 
-      // 2. PeerConnection
-      const pc = new RTCPeerConnection(ICE_SERVERS);
+      // 2. Obtener TURN de Twilio
+      const iceConfig = await obtenerIceServers();
+      const pc = new RTCPeerConnection(iceConfig);
       pcRef.current = pc;
 
       // 3. Tracks locales
@@ -317,12 +339,18 @@ export default function VideoCallScreen({ navigation, route }) {
           </View>
       }
 
-      {localStream && (
-        <View style={styles.localVideoContainer}>
-          <RTCView streamURL={localStream.toURL()} style={styles.localVideo} objectFit="cover" mirror={camaraFrontal} />
-          {mutedVideo && <View style={styles.videoMutedOverlay}><Ionicons name="videocam-off" size={20} color="#fff" /></View>}
-        </View>
-      )}
+  {localStream && (
+    <View style={styles.localVideoContainer}>
+      <RTCView 
+        streamURL={localStream.toURL()} 
+        style={styles.localVideo} 
+        objectFit="cover" 
+        mirror={camaraFrontal}
+        zOrder={1}
+      />
+            {mutedVideo && <View style={styles.videoMutedOverlay}><Ionicons name="videocam-off" size={20} color="#fff" /></View>}
+          </View>
+        )}
 
       <View style={styles.header}>
         <Text style={styles.headerNombre}>{otroUsuario?.nombre || 'Usuario'}</Text>

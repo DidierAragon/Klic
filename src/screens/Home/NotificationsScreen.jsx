@@ -14,13 +14,15 @@ export default function NotificationsScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [solicitudes, setSolicitudes] = useState([]);
+  const [notificaciones, setNotificaciones] = useState([]);
   const [unreadMsgs, setUnreadMsgs] = useState(0);
+
   const cargar = useCallback(async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const [{ data: solData }, { data: amistades }] = await Promise.all([
+      const [{ data: solData }, { data: amistades }, { data: notifData }] = await Promise.all([
         supabase
           .from('amigos')
           .select(`
@@ -35,9 +37,23 @@ export default function NotificationsScreen({ navigation }) {
           .select('id')
           .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`)
           .eq('estado', 'aceptado'),
+        supabase
+          .from('notificaciones')
+          .select(`
+            id,
+            tipo,
+            mensaje,
+            leido,
+            created_at,
+            actor:actor_id(nombre, avatar_url)
+          `)
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(30),
       ]);
 
       setSolicitudes(solData || []);
+      setNotificaciones(notifData || []);
 
       const ids = (amistades || []).map((a) => a.id);
       if (ids.length === 0) {
@@ -172,6 +188,42 @@ export default function NotificationsScreen({ navigation }) {
               >
                 <Ionicons name="close" size={18} color={palette.textMuted} />
               </TouchableOpacity>
+            </View>
+          ))
+        )}
+
+        {/* Notificaciones generales (como las de propinas de Klic Coins) */}
+        <Text style={[styles.sectionLabel, { color: palette.textMuted, marginTop: 28 }]}>
+          Novedades y Regalos
+        </Text>
+
+        {notificaciones.length === 0 ? (
+          <View style={[styles.emptyCard, { borderColor: palette.border, backgroundColor: palette.panel }]}>
+            <Ionicons name="sparkles-outline" size={40} color={palette.textMuted} />
+            <Text style={[styles.emptyText, { color: palette.text }]}>Sin novedades</Text>
+            <Text style={[styles.emptySub, { color: palette.textMuted }]}>
+              Aquí aparecerán las propinas, regalos e interacciones de tus fans.
+            </Text>
+          </View>
+        ) : (
+          notificaciones.map((n) => (
+            <View
+              key={n.id}
+              style={[styles.reqCard, { backgroundColor: palette.panel, borderColor: palette.border, paddingVertical: 16 }]}
+            >
+              <View style={[styles.bannerIcon, { backgroundColor: palette.primary + '1a', width: 44, height: 44, borderRadius: 22 }]}>
+                <Ionicons name="gift" size={22} color={palette.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.reqName, { color: palette.text, fontSize: 14, fontWeight: '600', lineHeight: 18 }]}>
+                  {n.mensaje}
+                </Text>
+                <Text style={[styles.reqHint, { color: palette.textMuted, fontSize: 11, marginTop: 4 }]}>
+                  {new Date(n.created_at).toLocaleDateString('es-CO', {
+                    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+                  })}
+                </Text>
+              </View>
             </View>
           ))
         )}

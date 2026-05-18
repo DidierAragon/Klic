@@ -23,6 +23,7 @@ export default function UploadPhotoScreen({ navigation, route }) {
   const [texto, setTexto] = useState('');
   const [descripcion, setDescripcion] = useState('');
   const [precio, setPrecio] = useState('');
+  const [restriccion, setRestriccion] = useState('publico'); // 'publico' | 'suscriptores' | 'pago_individual'
   const [loading, setLoading] = useState(false);
 
   const styles = makeStyles(palette);
@@ -75,9 +76,10 @@ export default function UploadPhotoScreen({ navigation, route }) {
           user_id: user.id,
           contenido: texto.trim(),
           precio: precioFinal,
+          restriccion: restriccion,
         });
         if (error) throw error;
-        if (precioFinal > 0) {
+        if (precioFinal > 0 || restriccion === 'suscriptores') {
           await supabase.from('users').update({ es_creador: true }).eq('id', user.id);
         }
 
@@ -108,9 +110,10 @@ export default function UploadPhotoScreen({ navigation, route }) {
             user_id: user.id, 
             url: publicUrl,
             precio: precioFinal,
+            restriccion: restriccion,
           });
           if (error) throw error;
-          if (precioFinal > 0) {
+          if (precioFinal > 0 || restriccion === 'suscriptores') {
             await supabase.from('users').update({ es_creador: true }).eq('id', user.id);
           }
         } else {
@@ -119,9 +122,10 @@ export default function UploadPhotoScreen({ navigation, route }) {
             url: publicUrl,
             descripcion: descripcion.trim() || null,
             precio: precioFinal,
+            restriccion: restriccion,
           });
           if (error) throw error;
-          if (precioFinal > 0) {
+          if (precioFinal > 0 || restriccion === 'suscriptores') {
             await supabase.from('users').update({ es_creador: true }).eq('id', user.id);
           }
         }
@@ -256,36 +260,90 @@ export default function UploadPhotoScreen({ navigation, route }) {
               />
             )}
 
-            {media && (
-              <View style={styles.priceContainer}>
-                <Ionicons name="pricetag-outline" size={20} color={palette.primary} />
-                <TextInput
-                  style={styles.priceInput}
-                  placeholder="Precio (opcional, ej: 4.99)"
-                  placeholderTextColor={palette.textMuted}
-                  value={precio}
-                  onChangeText={setPrecio}
-                  keyboardType="numeric"
-                />
-                <Text style={{ color: palette.textMuted, fontSize: 12 }}>USD</Text>
-              </View>
-            )}
-          </>
-        )}
+            {/* Control de Acceso */}
+            <View style={[styles.restriccionesCard, { backgroundColor: palette.panel, borderColor: palette.border }]}>
+              <Text style={[styles.restriccionesTitle, { color: palette.text }]}>Control de Acceso</Text>
+              <Text style={[styles.restriccionesSub, { color: palette.textMuted }]}>
+                Decide quién puede ver esta publicación y cómo monetizarla.
+              </Text>
 
-        {tipo === 'opinion' && (
-          <View style={[styles.priceContainer, { marginTop: -10, marginBottom: 20 }]}>
-            <Ionicons name="pricetag-outline" size={20} color={palette.primary} />
-            <TextInput
-              style={styles.priceInput}
-              placeholder="Precio para ver esta opinión (opcional)"
-              placeholderTextColor={palette.textMuted}
-              value={precio}
-              onChangeText={setPrecio}
-              keyboardType="numeric"
-            />
-            <Text style={{ color: palette.textMuted, fontSize: 12 }}>USD</Text>
-          </View>
+              <View style={styles.restriccionesOptions}>
+                {/* Opción Público */}
+                <TouchableOpacity
+                  style={[
+                    styles.restriccionOption,
+                    { borderColor: restriccion === 'publico' ? palette.primary : palette.border },
+                    restriccion === 'publico' && { backgroundColor: palette.primary + '10' }
+                  ]}
+                  onPress={() => { setRestriccion('publico'); setPrecio(''); }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="eye-outline" size={18} color={restriccion === 'publico' ? palette.primary : palette.textMuted} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.optionLabel, { color: palette.text }]}>Gratis / Público</Text>
+                    <Text style={[styles.optionSub, { color: palette.textMuted }]}>Visible para todos los usuarios de la comunidad.</Text>
+                  </View>
+                  {restriccion === 'publico' && <Ionicons name="checkmark-circle" size={18} color={palette.primary} />}
+                </TouchableOpacity>
+
+                {/* Opción Solo Suscriptores */}
+                <TouchableOpacity
+                  style={[
+                    styles.restriccionOption,
+                    { borderColor: restriccion === 'suscriptores' ? palette.primary : palette.border },
+                    restriccion === 'suscriptores' && { backgroundColor: palette.primary + '10' }
+                  ]}
+                  onPress={() => { setRestriccion('suscriptores'); setPrecio(''); }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="sparkles" size={18} color={restriccion === 'suscriptores' ? palette.primary : palette.textMuted} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.optionLabel, { color: palette.text }]}>Solo Suscriptores</Text>
+                    <Text style={[styles.optionSub, { color: palette.textMuted }]}>Exclusivo para personas suscritas a tu membresía mensual.</Text>
+                  </View>
+                  {restriccion === 'suscriptores' && <Ionicons name="checkmark-circle" size={18} color={palette.primary} />}
+                </TouchableOpacity>
+
+                {/* Opción Pago Individual */}
+                <TouchableOpacity
+                  style={[
+                    styles.restriccionOption,
+                    { borderColor: restriccion === 'pago_individual' ? palette.primary : palette.border },
+                    restriccion === 'pago_individual' && { backgroundColor: palette.primary + '10' }
+                  ]}
+                  onPress={() => setRestriccion('pago_individual')}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="pricetag-outline" size={18} color={restriccion === 'pago_individual' ? palette.primary : palette.textMuted} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.optionLabel, { color: palette.text }]}>Pago Individual (Dinero Separado)</Text>
+                    <Text style={[styles.optionSub, { color: palette.textMuted }]}>Todos pagan por verlo de forma individual (incluidos suscriptores).</Text>
+                  </View>
+                  {restriccion === 'pago_individual' && <Ionicons name="checkmark-circle" size={18} color={palette.primary} />}
+                </TouchableOpacity>
+              </View>
+
+              {restriccion === 'pago_individual' && (
+                <View style={[styles.priceInputRow, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}>
+                  <Text style={[styles.priceSymbol, { color: palette.text }]}>$</Text>
+                  <TextInput
+                    style={[styles.priceTextInput, { color: palette.text }]}
+                    placeholder="Ej. 4.99"
+                    placeholderTextColor={palette.textMuted}
+                    value={precio}
+                    onChangeText={(val) => {
+                      if (/^\d*\.?\d*$/.test(val)) {
+                        setPrecio(val);
+                      }
+                    }}
+                    keyboardType="decimal-pad"
+                    maxLength={8}
+                  />
+                  <Text style={[styles.priceInterval, { color: palette.textMuted }]}>USD</Text>
+                </View>
+              )}
+            </View>
+          </>
         )}
 
         {/* Botón publicar */}
@@ -413,4 +471,38 @@ const makeStyles = (palette) => StyleSheet.create({
 
   skipBtn: { alignItems: 'center', paddingVertical: 8 },
   skipText: { fontSize: 14, fontWeight: '600' },
+
+  // Restricciones de Acceso
+  restriccionesCard: {
+    padding: 16,
+    borderRadius: radii.lg,
+    borderWidth: 1.5,
+    marginBottom: 20,
+    gap: 8,
+  },
+  restriccionesTitle: { fontSize: 16, fontWeight: '800' },
+  restriccionesSub: { fontSize: 12, lineHeight: 16, marginBottom: 8 },
+  restriccionesOptions: { gap: 10 },
+  restriccionOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    borderRadius: radii.md,
+    borderWidth: 1.5,
+  },
+  optionLabel: { fontSize: 13, fontWeight: '700' },
+  optionSub: { fontSize: 11, marginTop: 2, lineHeight: 14 },
+  priceInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: radii.md,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginTop: 8,
+  },
+  priceSymbol: { fontSize: 16, fontWeight: '700', marginRight: 6 },
+  priceTextInput: { flex: 1, fontSize: 15, fontWeight: '600', paddingVertical: 4 },
+  priceInterval: { fontSize: 12, fontWeight: '700', marginLeft: 6 },
 });

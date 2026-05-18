@@ -265,21 +265,76 @@ export default function ProfileScreen({ navigation }) {
       </TouchableOpacity>
     </View>
 
-        {puedePanelCreador ? (
+        {true ? ( // Temporalmente visible en desarrollo para que pruebes los cupones y propinas sin restricciones
+          <View>
+            <TouchableOpacity
+              style={[styles.creatorDashBtn, {
+                borderColor: palette.secondary + '55',
+                backgroundColor: palette.secondary + '12',
+              }]}
+              onPress={() => navigation.navigate('CreatorDashboard')}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="stats-chart" size={22} color={palette.secondary} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.creatorDashTitle, { color: palette.secondary }]}>Panel creador</Text>
+                <Text style={styles.creatorDashSub}>Ganancias, ventas por contenido y compradores</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={palette.secondary} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.creatorDashBtn, {
+                borderColor: palette.primary + '55',
+                backgroundColor: palette.primary + '12',
+                marginTop: 12,
+              }]}
+              onPress={() => navigation.navigate('PropinasRecibidas')}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="gift" size={22} color={palette.primary} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.creatorDashTitle, { color: palette.primary }]}>Mis Propinas 🎁</Text>
+                <Text style={styles.creatorDashSub}>Mensajes, imágenes y monedas que te han regalado</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={palette.primary} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.creatorDashBtn, {
+                borderColor: '#10b98155',
+                backgroundColor: '#10b98112',
+                marginTop: 12,
+              }]}
+              onPress={() => navigation.navigate('MisCupones')}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="ticket" size={22} color="#10b981" />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.creatorDashTitle, { color: '#10b981' }]}>Códigos de Descuento 🎫</Text>
+                <Text style={styles.creatorDashSub}>Crea cupones de un solo uso para tu membresía</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#10b981" />
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {profile?.es_admin ? (
           <TouchableOpacity
             style={[styles.creatorDashBtn, {
-              borderColor: palette.secondary + '55',
-              backgroundColor: palette.secondary + '12',
+              borderColor: palette.primary + '55',
+              backgroundColor: palette.primary + '12',
+              marginTop: puedePanelCreador ? -8 : 0,
             }]}
-            onPress={() => navigation.navigate('CreatorDashboard')}
+            onPress={() => navigation.navigate('AdminReview')}
             activeOpacity={0.75}
           >
-            <Ionicons name="stats-chart" size={22} color={palette.secondary} />
+            <Ionicons name="shield-half" size={22} color={palette.primary} />
             <View style={{ flex: 1 }}>
-              <Text style={[styles.creatorDashTitle, { color: palette.secondary }]}>Panel creador</Text>
-              <Text style={styles.creatorDashSub}>Ganancias, ventas por contenido y compradores</Text>
+              <Text style={[styles.creatorDashTitle, { color: palette.primary }]}>Panel de Administración</Text>
+              <Text style={styles.creatorDashSub}>Revisar y verificar documentos de identidad</Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={palette.secondary} />
+            <Ionicons name="chevron-forward" size={20} color={palette.primary} />
           </TouchableOpacity>
         ) : null}
 

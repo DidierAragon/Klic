@@ -124,6 +124,41 @@ Deno.serve(async (req) => {
           .eq('stripe_id', charge.payment_intent as string)
         break
       }
+
+      // --- EVENTOS DE SUSCRIPCIONES RECURRENTES ---
+      case 'customer.subscription.created':
+      case 'customer.subscription.updated': {
+        const subscription = event.data.object as Stripe.Subscription
+        const subscriberId = subscription.metadata?.subscriberId
+        const creatorId = subscription.metadata?.creatorId
+
+        if (subscriberId && creatorId) {
+          const precioSuscripcion = subscription.items.data[0]?.price?.unit_amount 
+            ? subscription.items.data[0].price.unit_amount / 100 
+            : 0
+
+          await supabaseAdmin
+            .from('suscripciones')
+            .upsert({
+              subscriber_id: subscriberId,
+              creator_id: creatorId,
+              stripe_subscription_id: subscription.id,
+              status: subscription.status, // 'active', 'incomplete', 'past_due', etc.
+              precio: precioSuscripcion,
+              current_period_end: new Date(subscription.current_period_end * 1000).toISOString()
+            }, { onConflict: 'subscriber_id,creator_id' })
+        }
+        break
+      }
+
+      case 'customer.subscription.deleted': {
+        const subscription = event.data.object as Stripe.Subscription
+        await supabaseAdmin
+          .from('suscripciones')
+          .update({ status: 'canceled' })
+          .eq('stripe_subscription_id', subscription.id)
+        break
+      }
     }
 
     return new Response(JSON.stringify({ received: true }), {

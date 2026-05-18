@@ -31,13 +31,17 @@ import PostDetailScreen from './src/screens/Home/PostDetailScreen';
 import VerificacionDocumentoScreen from './src/screens/Profile/VerificacionDocumentoScreen';
 import SalaEsperaScreen from './src/screens/VideoChat/SalaEsperaScreen';
 import VideoCallScreen from './src/screens/VideoChat/VideoCallScreen';
+import AdminReviewScreen from './src/screens/Profile/AdminReviewScreen';
+import PropinasRecibidasScreen from './src/screens/Profile/PropinasRecibidasScreen';
+import MisCuponesScreen from './src/screens/Profile/MisCuponesScreen';
 
 const Stack = createNativeStackNavigator();
 
 const SIN_FAB = [
   'UploadPhoto', 'Chat', 'ChatAmigo', 'Comentarios',
   'CreatorDashboard', 'Login', 'Register', 'SearchUsers',
-  'Notifications', 'SalaEspera', 'VideoCall',
+  'Notifications', 'SalaEspera', 'VideoCall', 'AdminReview',
+  'PropinasRecibidas', 'MisCupones',
 ];
 
 function AppInner({ session }) {
@@ -77,6 +81,9 @@ function AppInner({ session }) {
             <Stack.Screen name="PostDetail" component={PostDetailScreen} />
             <Stack.Screen name="VerificacionDocumento" component={VerificacionDocumentoScreen} />
             <Stack.Screen name="SalaEspera" component={SalaEsperaScreen} />
+            <Stack.Screen name="AdminReview" component={AdminReviewScreen} />
+            <Stack.Screen name="PropinasRecibidas" component={PropinasRecibidasScreen} />
+            <Stack.Screen name="MisCupones" component={MisCuponesScreen} />
             <Stack.Screen
               name="VideoCall"
               component={VideoCallScreen}

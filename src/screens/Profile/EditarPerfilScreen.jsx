@@ -37,6 +37,13 @@ export default function EditarPerfilScreen({ navigation }) {
   const [userId, setUserId] = useState(null);
   const [aliasError, setAliasError] = useState('');
 
+  // Campos de suscripción (Creadores)
+  const [ofrecerSuscripcion, setOfrecerSuscripcion] = useState(false);
+  const [precioSuscripcion, setPrecioSuscripcion] = useState('0');
+  const [precioOriginal, setPrecioOriginal] = useState(0);
+  const [nombreSuscripcion, setNombreSuscripcion] = useState('');
+  const [descripcionSuscripcion, setDescripcionSuscripcion] = useState('');
+
   useEffect(() => {
     const cargar = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -45,7 +52,7 @@ export default function EditarPerfilScreen({ navigation }) {
 
       const { data } = await supabase
         .from('users')
-        .select('nombre, alias, descripcion, sexo, avatar_url')
+        .select('nombre, alias, descripcion, sexo, avatar_url, es_creador, precio_suscripcion, nombre_suscripcion, descripcion_suscripcion')
         .eq('id', user.id)
         .maybeSingle();
 
@@ -55,6 +62,13 @@ export default function EditarPerfilScreen({ navigation }) {
         setDescripcion(data.descripcion || '');
         setSexo(data.sexo || '');
         setAvatarUrl(data.avatar_url || '');
+        
+        const dbPrecio = data.precio_suscripcion ? parseFloat(data.precio_suscripcion) : 0;
+        setOfrecerSuscripcion(dbPrecio > 0 || !!data.es_creador);
+        setPrecioSuscripcion(String(dbPrecio));
+        setPrecioOriginal(dbPrecio);
+        setNombreSuscripcion(data.nombre_suscripcion || '');
+        setDescripcionSuscripcion(data.descripcion_suscripcion || '');
       }
       setLoading(false);
     };
@@ -135,6 +149,25 @@ export default function EditarPerfilScreen({ navigation }) {
         sexo: sexo || null,
         avatar_url: avatarUrl || null,
       };
+
+      if (ofrecerSuscripcion) {
+        const nuevoPrecio = parseFloat(precioSuscripcion) || 0;
+        updates.es_creador = true;
+        updates.precio_suscripcion = nuevoPrecio;
+        updates.nombre_suscripcion = nombreSuscripcion.trim() || null;
+        updates.descripcion_suscripcion = descripcionSuscripcion.trim() || null;
+        
+        // Si el precio cambió respecto al original, obligamos a recrear el precio en Stripe
+        if (nuevoPrecio !== precioOriginal) {
+          updates.stripe_price_id = null;
+        }
+      } else {
+        // Eliminar/desactivar membresía
+        updates.precio_suscripcion = 0;
+        updates.nombre_suscripcion = null;
+        updates.descripcion_suscripcion = null;
+        updates.stripe_price_id = null;
+      }
 
       const { error } = await supabase
         .from('users')
@@ -316,6 +349,93 @@ export default function EditarPerfilScreen({ navigation }) {
             ))}
           </View>
 
+          {/* Toggle Membresía de Pago */}
+          <View style={[styles.toggleRow, { borderColor: palette.border }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.toggleLabel, { color: palette.text }]}>Membresía Mensual de Pago</Text>
+              <Text style={[styles.toggleSub, { color: palette.textMuted }]}>
+                Permite que tus seguidores se suscriban por una tarifa mensual recurrente en Stripe.
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[
+                styles.switchContainer,
+                { backgroundColor: ofrecerSuscripcion ? palette.primary : palette.border }
+              ]}
+              onPress={() => setOfrecerSuscripcion(!ofrecerSuscripcion)}
+              activeOpacity={0.8}
+            >
+              <View style={[
+                styles.switchCircle,
+                { 
+                  transform: [{ translateX: ofrecerSuscripcion ? 20 : 0 }],
+                  backgroundColor: '#07070b'
+                }
+              ]} />
+            </TouchableOpacity>
+          </View>
+
+          {ofrecerSuscripcion && (
+            <View style={[styles.creatorSubCard, { backgroundColor: palette.panel, borderColor: palette.border }]}>
+              <View style={styles.subHeader}>
+                <Ionicons name="sparkles" size={20} color={palette.primary} />
+                <Text style={[styles.subTitle, { color: palette.primary }]}>Detalles de mi Membresía</Text>
+              </View>
+              <Text style={[styles.subDesc, { color: palette.textMuted }]}>
+                Configura los detalles de tu membresía. Los suscriptores pagarán este monto mensualmente a través de Stripe para acceder a todo tu contenido premium de forma automática.
+              </Text>
+
+              {/* Nombre de la Suscripción */}
+              <Text style={styles.label}>Nombre de la Suscripción</Text>
+              <TextInput
+                style={styles.input}
+                value={nombreSuscripcion}
+                onChangeText={setNombreSuscripcion}
+                placeholder="Ej. Suscripción VIP, Acceso Platino..."
+                placeholderTextColor={palette.textMuted}
+                maxLength={40}
+                autoCorrect={false}
+              />
+
+              {/* Precio Mensual */}
+              <Text style={styles.label}>Precio Mensual (USD)</Text>
+              <View style={[styles.priceInputRow, { borderColor: palette.border, backgroundColor: palette.panelSoft }]}>
+                <Text style={[styles.priceSymbol, { color: palette.text }]}>$</Text>
+                <TextInput
+                  style={[styles.priceTextInput, { color: palette.text }]}
+                  value={precioSuscripcion}
+                  onChangeText={(val) => {
+                    if (/^\d*\.?\d*$/.test(val)) {
+                      setPrecioSuscripcion(val);
+                    }
+                  }}
+                  keyboardType="decimal-pad"
+                  placeholder="0.00"
+                  placeholderTextColor={palette.textMuted}
+                  maxLength={10}
+                />
+                <Text style={[styles.priceInterval, { color: palette.textMuted }]}>/ mes</Text>
+              </View>
+
+              {/* Descripción / Privilegios */}
+              <Text style={styles.label}>Privilegios y Beneficios</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                value={descripcionSuscripcion}
+                onChangeText={setDescripcionSuscripcion}
+                placeholder="Ej. Acceso a todas mis fotos y videos premium, chat prioritario, adelantos exclusivos..."
+                placeholderTextColor={palette.textMuted}
+                multiline
+                maxLength={200}
+                textAlignVertical="top"
+                autoCorrect={false}
+              />
+              <Text style={[styles.charCount, { color: palette.textMuted }]}>
+                {descripcionSuscripcion.length}/200
+              </Text>
+            </View>
+          )}
+
         </View>
 
         <View style={{ height: 40 }} />
@@ -397,4 +517,57 @@ const makeStyles = (palette) => StyleSheet.create({
     borderRadius: radii.md, borderWidth: 1.5,
   },
   sexoBtnText: { flex: 1, fontSize: 14, fontWeight: '600' },
+
+  // Suscripción Creador
+  creatorSubCard: {
+    marginTop: 24,
+    padding: 16,
+    borderRadius: radii.lg,
+    borderWidth: 1.5,
+    gap: 2,
+  },
+  subHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  subTitle: { fontSize: 16, fontWeight: '800' },
+  subDesc: { fontSize: 12, lineHeight: 18, marginBottom: 12 },
+  priceInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: radii.md,
+    paddingHorizontal: 14,
+    height: 48,
+    gap: 6,
+  },
+  priceSymbol: { fontSize: 16, fontWeight: '700' },
+  priceTextInput: { flex: 1, fontSize: 15, fontWeight: '600', paddingVertical: 0 },
+  priceInterval: { fontSize: 13, fontWeight: '600' },
+
+  // Switch Toggle Customizado
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    marginTop: 20,
+    gap: 16,
+  },
+  toggleLabel: { fontSize: 15, fontWeight: '700' },
+  toggleSub: { fontSize: 12, lineHeight: 16, marginTop: 4 },
+  switchContainer: {
+    width: 48,
+    height: 28,
+    borderRadius: 14,
+    padding: 4,
+    justifyContent: 'center',
+  },
+  switchCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
+  },
 });

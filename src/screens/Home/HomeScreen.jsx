@@ -18,6 +18,8 @@ import FAB from '../../components/FAB';
 import VideoPlayer from '../../components/VideoPlayer';
 import KlicCoin from '../../components/KlicCoin';
 import { enviarSolicitudAmistad } from '../../utils/amigos';
+import EnviarPropinaModal from '../../components/EnviarPropinaModal';
+import DesbloquearContenidoModal from '../../components/DesbloquearContenidoModal';
 
 export default function HomeScreen({ navigation }) {
   const { palette } = useTema();
@@ -30,9 +32,23 @@ export default function HomeScreen({ navigation }) {
   const [publicaciones, setPublicaciones] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [compras, setCompras] = useState([]);
+  const [suscripcionesActivas, setSuscripcionesActivas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [notifCount, setNotifCount] = useState(0);
+
+  // Estados de propinas
+  const [tipModalVisible, setTipModalVisible] = useState(false);
+  const [tipReceiverId, setTipReceiverId] = useState('');
+  const [tipCreatorName, setTipCreatorName] = useState('');
+  const [tipReceiverAvatarUrl, setTipReceiverAvatarUrl] = useState(null);
+  const [tipPostId, setTipPostId] = useState(null);
+  const [tipPostType, setTipPostType] = useState(null);
+
+  // Estados de desbloqueo de contenido
+  const [unlockModalVisible, setUnlockModalVisible] = useState(false);
+  const [unlockItem, setUnlockItem] = useState(null);
+
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const { balance, buyContent, refreshWallet } = useWallet();
 
@@ -41,7 +57,7 @@ export default function HomeScreen({ navigation }) {
       const { data: { user } } = await supabase.auth.getUser();
       setCurrentUser(user);
 
-      const [{ data: f }, { data: o }, { data: v }, { data: c }] = await Promise.all([
+      const [{ data: f }, { data: o }, { data: v }, { data: c }, { data: s }] = await Promise.all([
         supabase.from('fotos_perfil')
           .select('*, users(id, nombre, avatar_url)')
           .order('created_at', { ascending: false }).limit(30),
@@ -54,6 +70,9 @@ export default function HomeScreen({ navigation }) {
         user
           ? supabase.from('compras').select('contenido_id').eq('comprador_id', user.id)
           : Promise.resolve({ data: [] }),
+        user
+          ? supabase.from('suscripciones').select('creator_id').eq('subscriber_id', user.id).eq('status', 'active')
+          : Promise.resolve({ data: [] }),
       ]);
 
       const feedUnificado = [
@@ -64,6 +83,7 @@ export default function HomeScreen({ navigation }) {
 
       setPublicaciones(feedUnificado);
       setCompras((c || []).map(item => item.contenido_id));
+      setSuscripcionesActivas((s || []).map(item => item.creator_id));
     } catch (e) {
       console.warn(e);
     } finally {
@@ -119,49 +139,14 @@ export default function HomeScreen({ navigation }) {
     // ... (existing Stripe logic remains as a fallback or secondary option)
   };
 
+  const handleUnlockSuccess = (itemId) => {
+    setCompras(prev => [...prev, itemId]);
+  };
+
   const desbloquearConMonedas = async (item, tabla) => {
     if (!currentUser) return Alert.alert('Error', 'Debes iniciar sesión');
-    
-    const costInCoins = Math.round(item.precio * 100);
-    
-    if (balance < costInCoins) {
-      return Alert.alert(
-        'Saldo Insuficiente', 
-        `Necesitas ${costInCoins} monedas. Tienes ${balance}.`,
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          { text: 'Comprar Monedas', onPress: () => navigation.navigate('Wallet') }
-        ]
-      );
-    }
-
-    Alert.alert(
-      'Confirmar Compra',
-      `¿Deseas desbloquear este contenido por ${costInCoins} monedas?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Confirmar',
-          onPress: async () => {
-            try {
-              setLoading(true);
-              const result = await buyContent(item.id, item.__tabla, costInCoins, item.user_id);
-              if (result.success) {
-                setCompras(prev => [...prev, item.id]);
-                await refreshWallet();
-                Alert.alert('✓ Éxito', 'Contenido desbloqueado correctamente.');
-              } else {
-                throw new Error(result.message);
-              }
-            } catch (e) {
-              Alert.alert('Error', e.message);
-            } finally {
-              setLoading(false);
-            }
-          }
-        }
-      ]
-    );
+    setUnlockItem({ ...item, __tabla: tabla });
+    setUnlockModalVisible(true);
   };
 
   const compartir = async (item, tipo) => {
@@ -237,6 +222,16 @@ export default function HomeScreen({ navigation }) {
     </View>
   );
 
+  const abrirModalPropina = (item, tipo) => {
+    if (!currentUser) return Alert.alert('Sesión', 'Inicia sesión para enviar propinas.');
+    setTipReceiverId(item.user_id);
+    setTipCreatorName(item.users?.nombre || 'Creador');
+    setTipReceiverAvatarUrl(item.users?.avatar_url || null);
+    setTipPostId(item.id);
+    setTipPostType(tipo);
+    setTipModalVisible(true);
+  };
+
   const renderAcciones = (item, tipo) => (
     <View style={styles.postActions}>
       {/* Like con corazón */}
@@ -280,14 +275,39 @@ export default function HomeScreen({ navigation }) {
         <Ionicons name="paper-plane-outline" size={20} color={palette.textMuted} />
         <Text style={styles.actionCount}>Compartir</Text>
       </TouchableOpacity>
+
+      {/* Propina */}
+      {(!currentUser || item.user_id !== currentUser.id) && (
+        <TouchableOpacity
+          style={styles.actionBtn}
+          onPress={() => abrirModalPropina(item, tipo)}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="gift-outline" size={20} color={palette.primary} />
+          <Text style={[styles.actionCount, { color: palette.primary }]}>Propina</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 
   const renderFoto = ({ item }) => {
-    const esPagado = item.precio > 0;
     const esDueno = currentUser?.id === item.user_id;
     const yaComprado = compras.includes(item.id);
-    const bloqueado = esPagado && !esDueno && !yaComprado;
+    const esSuscriptor = suscripcionesActivas.includes(item.user_id);
+    
+    let bloqueado = false;
+    let esSoloSuscriptor = false;
+
+    if (!esDueno) {
+      if (item.restriccion === 'suscriptores') {
+        bloqueado = !esSuscriptor;
+        esSoloSuscriptor = true;
+      } else if (item.restriccion === 'pago_individual') {
+        bloqueado = item.precio > 0 && !yaComprado;
+      } else {
+        bloqueado = item.precio > 0 && !yaComprado && !esSuscriptor;
+      }
+    }
 
     return (
       <View style={styles.postCard}>
@@ -302,26 +322,46 @@ export default function HomeScreen({ navigation }) {
             >
               <View style={styles.lockOverlay}>
                 <View style={[styles.lockIconBox, { backgroundColor: palette.primary }]}>
-                  <Ionicons name="lock-closed" size={32} color="#fff" />
+                  <Ionicons name={esSoloSuscriptor ? "sparkles" : "lock-closed"} size={32} color="#07070b" />
                 </View>
-                <Text style={styles.blurTitle}>Contenido Premium</Text>
-                <Text style={styles.blurSub}>
-                  Este contenido tiene un costo de ${item.precio} USD
+                <Text style={styles.blurTitle}>
+                  {esSoloSuscriptor ? "Exclusivo Suscriptores" : "Contenido Premium"}
                 </Text>
-                <TouchableOpacity
-                  style={[styles.buyBtnLarge, { backgroundColor: palette.primary }]}
-                  onPress={() => desbloquearConMonedas(item, 'fotos_perfil')}
-                  activeOpacity={0.8}
-                >
-                  <KlicCoin size={20} />
-                  <Text style={[styles.buyBtnTextLarge, { marginLeft: 6 }]}>Desbloquear ({Math.round(item.precio * 100)})</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => comprarContenido(item, 'fotos_perfil')}
-                  style={{ marginTop: 15 }}
-                >
-                  <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12 }}>O paga con tarjeta (${item.precio} USD)</Text>
-                </TouchableOpacity>
+                <Text style={styles.blurSub}>
+                  {esSoloSuscriptor
+                    ? "Únete a la membresía mensual de este creador"
+                    : `Este contenido tiene un costo de $${item.precio} USD`}
+                </Text>
+                
+                {esSoloSuscriptor ? (
+                  <TouchableOpacity
+                    style={[styles.buyBtnLarge, { backgroundColor: palette.primary }]}
+                    onPress={() => navigation.navigate('UserProfile', { userId: item.user_id })}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="sparkles-outline" size={20} color="#07070b" />
+                    <Text style={[styles.buyBtnTextLarge, { marginLeft: 6, color: '#07070b', fontWeight: '800' }]}>
+                      Ver Membresía
+                    </Text>
+                  </TouchableOpacity>
+                ) : (
+                  <>
+                    <TouchableOpacity
+                      style={[styles.buyBtnLarge, { backgroundColor: palette.primary }]}
+                      onPress={() => desbloquearConMonedas(item, 'fotos_perfil')}
+                      activeOpacity={0.8}
+                    >
+                      <KlicCoin size={20} />
+                      <Text style={[styles.buyBtnTextLarge, { marginLeft: 6 }]}>Desbloquear ({Math.round(item.precio * 100)})</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => comprarContenido(item, 'fotos_perfil')}
+                      style={{ marginTop: 15 }}
+                    >
+                      <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12 }}>O paga con tarjeta (${item.precio} USD)</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
               </View>
             </BlurView>
           )}
@@ -332,10 +372,23 @@ export default function HomeScreen({ navigation }) {
   };
 
   const renderOpinion = ({ item }) => {
-    const esPagado = item.precio > 0;
     const esDueno = currentUser?.id === item.user_id;
     const yaComprado = compras.includes(item.id);
-    const bloqueado = esPagado && !esDueno && !yaComprado;
+    const esSuscriptor = suscripcionesActivas.includes(item.user_id);
+    
+    let bloqueado = false;
+    let esSoloSuscriptor = false;
+
+    if (!esDueno) {
+      if (item.restriccion === 'suscriptores') {
+        bloqueado = !esSuscriptor;
+        esSoloSuscriptor = true;
+      } else if (item.restriccion === 'pago_individual') {
+        bloqueado = item.precio > 0 && !yaComprado;
+      } else {
+        bloqueado = item.precio > 0 && !yaComprado && !esSuscriptor;
+      }
+    }
 
     return (
       <View style={styles.opinionCard}>
@@ -345,17 +398,26 @@ export default function HomeScreen({ navigation }) {
             backgroundColor: palette.panelSoft,
             borderColor: palette.border
           }]}>
-            <Ionicons name="lock-closed-outline" size={24} color={palette.textMuted} />
+            <Ionicons name={esSoloSuscriptor ? "sparkles" : "lock-closed-outline"} size={24} color={palette.primary} />
             <Text style={styles.opinionBloqueadaText}>
-              Opinión de pago — ${item.precio} USD
+              {esSoloSuscriptor ? "Exclusivo Suscriptores" : `Opinión de pago — $${item.precio} USD`}
             </Text>
-            <TouchableOpacity
-              style={[styles.buyBtnSmall, { backgroundColor: palette.primary }]}
-              onPress={() => desbloquearConMonedas(item, 'opiniones')}
-            >
-              <KlicCoin size={14} />
-              <Text style={[styles.buyBtnTextSmall, { marginLeft: 4 }]}>{Math.round(item.precio * 100)}</Text>
-            </TouchableOpacity>
+            {esSoloSuscriptor ? (
+              <TouchableOpacity
+                style={[styles.buyBtnSmall, { backgroundColor: palette.primary, paddingHorizontal: 12 }]}
+                onPress={() => navigation.navigate('UserProfile', { userId: item.user_id })}
+              >
+                <Text style={{ color: '#07070b', fontWeight: '800', fontSize: 11 }}>Membresía</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[styles.buyBtnSmall, { backgroundColor: palette.primary }]}
+                onPress={() => desbloquearConMonedas(item, 'opiniones')}
+              >
+                <KlicCoin size={14} />
+                <Text style={[styles.buyBtnTextSmall, { marginLeft: 4 }]}>{Math.round(item.precio * 100)}</Text>
+              </TouchableOpacity>
+            )}
           </View>
         ) : (
           <Text style={styles.opinionTexto}>{item.contenido}</Text>
@@ -366,10 +428,23 @@ export default function HomeScreen({ navigation }) {
   };
 
   const renderVideo = ({ item }) => {
-    const esPagado = item.precio > 0;
     const esDueno = currentUser?.id === item.user_id;
     const yaComprado = compras.includes(item.id);
-    const bloqueado = esPagado && !esDueno && !yaComprado;
+    const esSuscriptor = suscripcionesActivas.includes(item.user_id);
+    
+    let bloqueado = false;
+    let esSoloSuscriptor = false;
+
+    if (!esDueno) {
+      if (item.restriccion === 'suscriptores') {
+        bloqueado = !esSuscriptor;
+        esSoloSuscriptor = true;
+      } else if (item.restriccion === 'pago_individual') {
+        bloqueado = item.precio > 0 && !yaComprado;
+      } else {
+        bloqueado = item.precio > 0 && !yaComprado && !esSuscriptor;
+      }
+    }
   
     return (
       <View style={styles.videoCard}>
@@ -390,24 +465,46 @@ export default function HomeScreen({ navigation }) {
             >
               <View style={styles.lockOverlay}>
                 <View style={[styles.lockIconBox, { backgroundColor: palette.primary }]}>
-                  <Ionicons name="lock-closed" size={32} color="#fff" />
+                  <Ionicons name={esSoloSuscriptor ? "sparkles" : "lock-closed"} size={32} color="#07070b" />
                 </View>
-                <Text style={styles.blurTitle}>Video Premium</Text>
-                <Text style={styles.blurSub}>${item.precio} USD</Text>
-                <TouchableOpacity
-                  style={[styles.buyBtnLarge, { backgroundColor: palette.primary }]}
-                  onPress={() => desbloquearConMonedas(item, 'videos')}
-                  activeOpacity={0.8}
-                >
-                  <KlicCoin size={20} />
-                  <Text style={[styles.buyBtnTextLarge, { marginLeft: 6 }]}>Desbloquear ({Math.round(item.precio * 100)})</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => comprarContenido(item, 'videos')}
-                  style={{ marginTop: 15 }}
-                >
-                  <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12 }}>O paga con tarjeta (${item.precio} USD)</Text>
-                </TouchableOpacity>
+                <Text style={styles.blurTitle}>
+                  {esSoloSuscriptor ? "Exclusivo Suscriptores" : "Video Premium"}
+                </Text>
+                <Text style={styles.blurSub}>
+                  {esSoloSuscriptor
+                    ? "Únete a la membresía mensual de este creador"
+                    : `Este video tiene un costo de $${item.precio} USD`}
+                </Text>
+                
+                {esSoloSuscriptor ? (
+                  <TouchableOpacity
+                    style={[styles.buyBtnLarge, { backgroundColor: palette.primary }]}
+                    onPress={() => navigation.navigate('UserProfile', { userId: item.user_id })}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="sparkles-outline" size={20} color="#07070b" />
+                    <Text style={[styles.buyBtnTextLarge, { marginLeft: 6, color: '#07070b', fontWeight: '800' }]}>
+                      Ver Membresía
+                    </Text>
+                  </TouchableOpacity>
+                ) : (
+                  <>
+                    <TouchableOpacity
+                      style={[styles.buyBtnLarge, { backgroundColor: palette.primary }]}
+                      onPress={() => desbloquearConMonedas(item, 'videos')}
+                      activeOpacity={0.8}
+                    >
+                      <KlicCoin size={20} />
+                      <Text style={[styles.buyBtnTextLarge, { marginLeft: 6 }]}>Desbloquear ({Math.round(item.precio * 100)})</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => comprarContenido(item, 'videos')}
+                      style={{ marginTop: 15 }}
+                    >
+                      <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12 }}>O paga con tarjeta (${item.precio} USD)</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
               </View>
             </BlurView>
           )}
@@ -499,6 +596,28 @@ export default function HomeScreen({ navigation }) {
 
       <MainMenu navigation={navigation} active="Home" />
       <FAB />
+
+      {/* Modal de Enviar Propina */}
+      <EnviarPropinaModal
+        visible={tipModalVisible}
+        onClose={() => setTipModalVisible(false)}
+        receiverId={tipReceiverId}
+        creatorName={tipCreatorName}
+        receiverAvatarUrl={tipReceiverAvatarUrl}
+        postId={tipPostId}
+        postType={tipPostType}
+      />
+
+      {/* Modal de Desbloquear Contenido con Cupones */}
+      <DesbloquearContenidoModal
+        visible={unlockModalVisible}
+        onClose={() => {
+          setUnlockModalVisible(false);
+          setUnlockItem(null);
+        }}
+        item={unlockItem}
+        onSuccess={handleUnlockSuccess}
+      />
     </View>
   );
 }
